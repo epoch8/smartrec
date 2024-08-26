@@ -1,0 +1,69 @@
+backend: "python"
+
+input [
+  {
+    name: "profile_id"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+    optional: true
+  }
+]
+input [
+  {
+    name: "post_id"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+    optional: true
+  }
+]
+input [
+  {
+    name: "limit"
+    data_type: TYPE_INT32
+    dims: [ 1 ]
+  }
+]
+input [
+  {
+    name: "method"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+input [
+  {
+    name: "model_type"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+
+output [
+  {
+    name: "post_ids"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+  }
+]
+output [
+  {
+    name: "scores"
+    data_type: TYPE_FP32
+    dims: [ -1 ]
+  }
+]
+output [
+  {
+    name: "strategy"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+
+parameters: {
+  key: "EXECUTION_ENV_PATH",
+  value: {string_value: "$$TRITON_MODEL_DIRECTORY/env.tar.gz"}
+}
+
+instance_group [{ kind: KIND_CPU }]
+name: "als_v3"
