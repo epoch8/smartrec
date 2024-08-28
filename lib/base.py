@@ -1,8 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
+
 import pandas as pd
 from pydantic import BaseModel
-from enum import Enum
-
 
 
 class RecomItem(BaseModel):
