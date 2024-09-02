@@ -65,11 +65,11 @@ def create_initial_structure(base_s3_url: Pathy, model_name: str) -> None:
     # Copy config.pbtxt and model.py from the local serving folder
     serving_config_path = SERVING_FOLDER_PATH / "config.pbtxt"
     serving_model_path = SERVING_FOLDER_PATH / "model.py"
-    serving_python_path = SERVING_FOLDER_PATH / "triton_python_backend_stub"
+    # serving_python_path = SERVING_FOLDER_PATH / "triton_python_backend_stub"
 
     config_s3_path = models_folder_path / "config.pbtxt"
     model_py_s3_path = models_folder_path / "model.py"
-    python_s3_path = models_folder_path / "triton_python_backend_stub"
+    # python_s3_path = models_folder_path / "triton_python_backend_stub"
 
     logger.info("Creating initial structure with config.pbtxt and model.py...")
 
@@ -81,9 +81,9 @@ def create_initial_structure(base_s3_url: Pathy, model_name: str) -> None:
         with open(serving_model_path, "rb") as local_model_file:
             model_s3_file.write(local_model_file.read())
 
-    with fs.open(python_s3_path, "wb") as model_s3_file:
-        with open(serving_python_path, "rb") as local_model_file:
-            model_s3_file.write(local_model_file.read())
+    # with fs.open(python_s3_path, "wb") as model_s3_file:
+    #     with open(serving_python_path, "rb") as local_model_file:
+    #         model_s3_file.write(local_model_file.read())
 
     logger.info("Initial structure created successfully.")
 

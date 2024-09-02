@@ -2,7 +2,7 @@ backend: "python"
 
 input [
   {
-    name: "profile_id"
+    name: "user_ids"
     data_type: TYPE_STRING
     dims: [ 1 ]
     optional: true
@@ -10,7 +10,7 @@ input [
 ]
 input [
   {
-    name: "post_id"
+    name: "item_ids"
     data_type: TYPE_STRING
     dims: [ 1 ]
     optional: true
@@ -18,52 +18,42 @@ input [
 ]
 input [
   {
-    name: "limit"
+    name: "top_n"
     data_type: TYPE_INT32
     dims: [ 1 ]
   }
 ]
 input [
   {
-    name: "method"
-    data_type: TYPE_STRING
-    dims: [ 1 ]
-  }
-]
-input [
-  {
-    name: "model_type"
-    data_type: TYPE_STRING
+    name: "filter_viewed"
+    data_type: TYPE_BOOL
     dims: [ 1 ]
   }
 ]
 
 output [
   {
-    name: "post_ids"
+    name: "user_ids"
     data_type: TYPE_STRING
     dims: [ -1 ]
-  }
-]
-output [
+  },
+  {
+    name: "item_ids"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+  },
   {
     name: "scores"
     data_type: TYPE_FP32
     dims: [ -1 ]
   }
 ]
-output [
-  {
-    name: "strategy"
-    data_type: TYPE_STRING
-    dims: [ 1 ]
-  }
-]
 
-parameters: {
-  key: "EXECUTION_ENV_PATH",
-  value: {string_value: "$$TRITON_MODEL_DIRECTORY/env.tar.gz"}
+dynamic_batching {
+  default_queue_policy {
+    default_timeout_microseconds: 5000000
+  }
 }
 
 instance_group [{ kind: KIND_CPU }]
-name: "als_v3"
+name: "als_build_ideas"

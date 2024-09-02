@@ -3,7 +3,8 @@ import os
 
 import pandas as pd
 import triton_python_backend_utils as pb_utils
-from src.apps.recommendation.lib.recommender_als import RecommenderALS
+from smartrec.lib.recommender_als import RecommenderALS
+
 
 
 class TritonPythonModel:
@@ -29,76 +30,68 @@ class TritonPythonModel:
 
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args["model_config"])
-
-        # Get post_ids configuration
-        post_ids_config = pb_utils.get_output_config_by_name(model_config, "post_ids")
+        
+        print(f"{self.model_config=}")
+        # Get user_ids configuration
+        user_ids_config = pb_utils.get_output_config_by_name(model_config, "user_ids")
+        
+        # Get item_ids configuration
+        item_ids_config = pb_utils.get_output_config_by_name(model_config, "item_ids")
         #
         # Get scores configuration
         scores_config = pb_utils.get_output_config_by_name(model_config, "scores")
+        
+        print(f"{user_ids_config=}")
 
-        # Get strategy configuration
-        strategy_config = pb_utils.get_output_config_by_name(model_config, "strategy")
 
         # Convert Triton types to numpy types
-        self.post_ids_dtype = pb_utils.triton_string_to_numpy(
-            post_ids_config["data_type"]
+        self.user_ids_dtype = pb_utils.triton_string_to_numpy(
+            user_ids_config["data_type"]
+        )
+        self.item_ids_dtype = pb_utils.triton_string_to_numpy(
+            item_ids_config["data_type"]
         )
         self.scores_dtype = pb_utils.triton_string_to_numpy(scores_config["data_type"])
-        self.strategy_dtype = pb_utils.triton_string_to_numpy(
-            strategy_config["data_type"]
-        )
-
+        
         script_path = os.path.dirname(os.path.abspath(__file__))
-        self.model: RecommenderALS = RecommenderALS(model_version="").load_model(
-            load_dir=script_path, run_inference=True
+        self.model: RecommenderALS = RecommenderALS.load_model(
+            load_dir=script_path
         )
-
-    def convert_model_response_to_triton_response(self, model_responses, strategy_dict):
-        post_ids = pd.DataFrame(
+        
+    def convert_model_response_to_triton_response(self, model_responses):
+        user_ids = pd.DataFrame(
+            [recommendation.user_id for recommendation in model_responses]
+        )
+        item_ids = pd.DataFrame(
             [recommendation.item_id for recommendation in model_responses]
         )
         scores = pd.DataFrame(
             [recommendation.score for recommendation in model_responses]
         )
-        data = pd.DataFrame([strategy_dict["strategy"]])
 
         # Create output tensors. You need pb_utils.Tensor
         # objects to create pb_utils.InferenceResponse.
-        post_ids_tensor = pb_utils.Tensor(
-            "post_ids", post_ids.values.astype(self.post_ids_dtype)
+        user_ids_tensor = pb_utils.Tensor(
+            "user_ids", user_ids.values.astype(self.user_ids_dtype)
+        )
+        item_ids_tensor = pb_utils.Tensor(
+            "item_ids", item_ids.values.astype(self.item_ids_dtype)
         )
         scores_tensor = pb_utils.Tensor(
             "scores", scores.values.astype(self.scores_dtype)
         )
-        strategy_tensor = pb_utils.Tensor(
-            "strategy", data.values.astype(self.strategy_dtype)
-        )
 
         inference_response = pb_utils.InferenceResponse(
-            output_tensors=[post_ids_tensor, scores_tensor, strategy_tensor]
+            output_tensors=[user_ids_tensor, item_ids_tensor, scores_tensor]
         )
         return inference_response
 
-    def recommend(self, profile_id, top_n, model_type):
-        recommendations, strategy_dict = self.model.recommend(
-            user_id=profile_id,
-            user_history=None,
-            top_n=top_n,
-            filter_already_liked_items=False,
-            items=None,
-            model_type=model_type,
+    def recommend(self, user_ids, top_n, filter_viewed):
+        recommendations = self.model.recommend(
+            user_ids=user_ids, top_n=top_n, filter_viewed=filter_viewed
         )
         inference_response = self.convert_model_response_to_triton_response(
-            recommendations, strategy_dict
-        )
-        return inference_response
-
-    def look_alike_items(self, post_id, top_n):
-        recommendations, strategy_dict = self.model.look_alike_items(
-            item_id=post_id, top_n=top_n
-        )
-        inference_response = self.convert_model_response_to_triton_response(
-            recommendations, strategy_dict
+            recommendations
         )
         return inference_response
 
@@ -126,33 +119,19 @@ class TritonPythonModel:
 
         # Every Python backend must iterate over everyone of the requests
         # and create a pb_utils.InferenceResponse for each of them.
+        print(f"{requests=}")
         for request in requests:
-            method = pb_utils.get_input_tensor_by_name(request, "method")
-            method = method.as_numpy()[0].decode("utf-8")
-            limit = pb_utils.get_input_tensor_by_name(request, "limit").as_numpy()[0]
-            model_type = (
-                pb_utils.get_input_tensor_by_name(request, "model_type")
-                .as_numpy()[0]
-                .decode("utf-8")
+            user_ids = (
+                pb_utils.get_input_tensor_by_name(request, "user_ids")
+                .as_numpy().decode("utf-8")
             )
-
-            if method == "recommend":
-                profile_id = (
-                    pb_utils.get_input_tensor_by_name(request, "profile_id")
-                    .as_numpy()[0]
-                    .decode("utf-8")
-                )
-                inference_response = self.recommend(profile_id, limit, model_type)
-                responses.append(inference_response)
-
-            elif method == "look_alike_items":
-                post_id = (
-                    pb_utils.get_input_tensor_by_name(request, "post_id")
-                    .as_numpy()[0]
-                    .decode("utf-8")
-                )
-                inference_response = self.look_alike_items(post_id, limit)
-                responses.append(inference_response)
+            top_n = pb_utils.get_input_tensor_by_name(request, "top_n").as_numpy()[0]
+            filter_viewed = (
+                pb_utils.get_input_tensor_by_name(request, "filter_viewed")
+                .as_numpy()
+            )
+            inference_response = self.recommend(user_ids, top_n, filter_viewed)
+            responses.append(inference_response)        
 
         # You should return a list of pb_utils.InferenceResponse. Length
         # of this list must match the length of `requests` list.
