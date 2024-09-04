@@ -9,6 +9,7 @@ from implicit.als import AlternatingLeastSquares
 from pathy import Pathy
 from rectools.dataset import Dataset
 from rectools.models import ImplicitALSWrapperModel
+from rectools.dataset.identifiers import IdMap
 
 from smartrec.lib.base import RecommenderModel
 from smartrec.lib.save_and_load_triton_models import (
@@ -24,6 +25,8 @@ logger.setLevel(logging.INFO)
 
 
 class RecommenderALS(RecommenderModel):
+    model_architecture = "als"
+    
     def __init__(
         self,
         recsys_config: Optional[ALSSettings] = None,
@@ -40,13 +43,15 @@ class RecommenderALS(RecommenderModel):
         self.model: ImplicitALSWrapperModel = None
         self.item_model: ImplicitALSWrapperModel = None
         self.dataset: Dataset = None # might take unnecessary memory
+        self.item_id_map: IdMap = None
+        self.user_id_map: IdMap = None
 
     def train(self, dataset: Dataset):
         self.dataset = dataset
 
         logger.info("Fitting model...")
 
-        model = ImplicitALSWrapperModel(
+        self.model = ImplicitALSWrapperModel(
             AlternatingLeastSquares(
                 factors=self.recsys_config.ALS_FACTORS,
                 regularization=self.recsys_config.ALS_REGULARIZATION_FACTOR,
@@ -56,44 +61,45 @@ class RecommenderALS(RecommenderModel):
             ),
             fit_features_together=False,  # way to fit paired features
         )
-        model.fit(dataset)
+        self.model.fit(dataset)
+        self.user_id_map = dataset.user_id_map
+        self.item_id_map = dataset.item_id_map
         logger.info("Base model trained.")
-        self.model = model
         
     def recommend(
         self,
-        user_ids: List[str],
+        user_ids: str,
         top_n: int = 20,
         filter_viewed: bool = True,
-    ) -> List[RecomItemUsers]:  # Return type is a list of RecomItemUsers
+    ) -> List[RecomItem]:  # Return type is a list of RecomItemUsers
+        logger.info(f"Predicting for user {user_ids}")
 
         # user can be in the short memory, long memory or nowhere
-        recos: pd.DataFrame = self.model.model.recommend(
-            users=user_ids,
+        recos: pd.DataFrame = self.model.recommend(
+            users=[user_ids],
             dataset=self.dataset,
-            top_n=top_n,
+            k=top_n,
             filter_viewed=filter_viewed,
         )
-        recos = recos.sort_values('user_id').reset_index(drop=True)  # Assuming 'user_id' is the column name
+        recos = recos.sort_values(['user_id', 'score'], ascending=False).reset_index(drop=True)  # Assuming 'user_id' is the column name
 
         # Initialize an empty list to store the result
-        recom_item_users_list: List[RecomItemUsers] = []
+        # recom_item_users_list: List[RecomItemUsers] = []
 
         # Group the DataFrame by user_id
-        grouped = recos.groupby('user_id')
+        # grouped = recos.groupby('user_id')
 
-        for user_id, group in grouped:
-            # Create a list of RecomItem objects for the current user
-            reco_items = [
-                RecomItem(item_id=str(row['item_id']), score=row['score'])
-                for _, row in group.iterrows()
-            ]
 
-            # Create a RecomItemUsers object for the current user and append it to the list
-            recom_item_users = RecomItemUsers(user_id=(str(user_id), len(reco_items)), reco_items=reco_items)
-            recom_item_users_list.append(recom_item_users)
+        reco_items = [
+            RecomItem(item_id=str(row['item_id']), score=row['score'])
+            for _, row in recos.iterrows()
+        ]
 
-        return recom_item_users_list
+        # # Create a RecomItemUsers object for the current user and append it to the list
+        # recom_item_users = RecomItemUsers(user_id=user_id, reco_items=reco_items)
+        # recom_item_users_list.append(recom_item_users)
+
+        return reco_items
             
 
     def save_model(self, save_dir: str) -> None:
@@ -186,14 +192,20 @@ class RecommenderALS(RecommenderModel):
         logger.info(f"Saving model to {base_s3_url}")
         upload_model_files(
             base_s3_url,
+            model_architecture = RecommenderALS.model_architecture,
             model_name=self.model_name,
             model_version=self.model_version,
             model_data=self.__dict__,
         )
         logger.info(f"Model saved successfully!")
-        edit_config_pbtxt(base_s3_url, model_name=self.model_name)
+        edit_config_pbtxt(
+            base_s3_url=base_s3_url, 
+            model_name=self.model_name
+        )
         clean_old_model_versions(
-            base_s3_url, model_name=self.model_name, num_to_keep=num_to_keep
+            base_s3_url=base_s3_url, 
+            model_name=self.model_name, 
+            num_to_keep=num_to_keep
         )
         logger.info(f"Old models deleted!")
 

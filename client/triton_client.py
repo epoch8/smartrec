@@ -1,14 +1,10 @@
-from ast import boolop
 from typing import List, Dict
-from uuid import UUID
 import numpy as np
 from urllib.parse import urlparse
 from tritonclient.utils import InferenceServerException
-from tritonclient.http import InferenceServerClient, InferInput
-from smartrec.lib.model import ALSSettings, RecomItemUsers, RecomItem
 
 
-class TritonModel:
+class TritonModelClient:
     """
     A wrapper over a model served by the Triton Inference Server.
     """
@@ -23,15 +19,18 @@ class TritonModel:
 
                 self.client = InferenceServerClient(parsed_url.netloc)  # Triton GRPC client
                 self.metadata = self.client.get_model_metadata(self.model_name, as_json=True)
+                self.infer_input = InferInput
 
             else:
                 from tritonclient.http import InferenceServerClient, InferInput
 
                 self.client = InferenceServerClient(parsed_url.netloc)  # Triton HTTP client
                 self.metadata = self.client.get_model_metadata(self.model_name)
+                self.infer_input = InferInput
 
         except InferenceServerException as e:
             raise RuntimeError(f"Failed to get metadata for model '{self.model_name}': {str(e)}")
+
 
     def __call__(self, **kwargs) -> Dict:
         """
@@ -40,14 +39,28 @@ class TritonModel:
         """
         inputs = self._create_inputs(**kwargs)
         try:
-            print(f"!!!!{inputs=}")
             response = self.client.infer(model_name=self.model_name, inputs=inputs)
         except InferenceServerException as e:
-            raise RuntimeError(f"Failed to perform inference on model '{self.model_name}': {str(e)}")
+            raise RuntimeError(f"Failed to perform inference on model '{self.model_name}': {str(e)}, params {kwargs}")
 
-        result = {output["name"]: response.as_numpy(output["name"]) for output in self.metadata["outputs"]}
+        result = {}
+
+        # Process the output, decode if data type is 'BYTES', and skip None values
+        for output in self.metadata["outputs"]:
+            output_name = output["name"]
+            output_data = response.as_numpy(output_name)
+
+            if output_data is None:
+                continue  # Skip if the output data is None
+
+            if output["datatype"] == "BYTES":  # If it's BYTES, decode to UTF-8
+                decoded_data = [x.decode('utf-8') for x in output_data.flatten()]  # Convert to list of strings
+                result[output_name] = decoded_data
+            else:
+                result[output_name] = output_data.flatten().tolist()  # Convert to list of floats
+
         return result
-
+    
     def _create_inputs(self, **kwargs):
         """Creates input tensors from kwargs."""
         placeholders = []
@@ -57,7 +70,7 @@ class TritonModel:
             value = kwargs.get(input_name)
             
             if value is not None:
-                infer_input = InferInput(
+                infer_input = self.infer_input(
                     name=input_name,
                     shape=[int(s) for s in i["shape"]],
                     datatype=i["datatype"]
@@ -70,7 +83,7 @@ class TritonModel:
         return placeholders
     
     
-def recommendations(triton_server_url: str, user_ids: str, model_name: str, top_n: int, filter_viewed: bool) -> dict:
+def recommendations_triton(triton_server_url: str, user_ids: str, model_name: str, top_n: int, filter_viewed: bool) -> dict:
     """
     Method to obtain recommendations from Triton Inference Server.
 
@@ -82,14 +95,16 @@ def recommendations(triton_server_url: str, user_ids: str, model_name: str, top_
     
     :return: Dictionary with model version, data, and strategy.
     """
-    model = TritonModel(triton_server_url, model_name)
+    model = TritonModelClient(triton_server_url, model_name)
 
     inputs = {
-        "user_ids": np.array([user_ids.encode('utf-8')], dtype=np.object_),  # Ensure user_ids is a 1D array
+        "user_ids": np.array([user_ids], dtype=np.object_),  # Ensure user_ids is a 1D array
         "top_n": np.array([top_n], dtype=np.int32),
         "filter_viewed": np.array([filter_viewed], dtype=np.bool_),
     }
 
     recom_item_users = model(**inputs)
+    
+    print(model.metadata)
 
-    return {"model_version": model.metadata["version"], "data": recom_item_users}
+    return {"model_version": model.metadata["versions"][0], "data": recom_item_users}

@@ -32,22 +32,15 @@ class TritonPythonModel:
         self.model_config = model_config = json.loads(args["model_config"])
         
         print(f"{self.model_config=}")
-        # Get user_ids configuration
-        user_ids_config = pb_utils.get_output_config_by_name(model_config, "user_ids")
         
         # Get item_ids configuration
         item_ids_config = pb_utils.get_output_config_by_name(model_config, "item_ids")
-        #
+
         # Get scores configuration
         scores_config = pb_utils.get_output_config_by_name(model_config, "scores")
-        
-        print(f"{user_ids_config=}")
-
 
         # Convert Triton types to numpy types
-        self.user_ids_dtype = pb_utils.triton_string_to_numpy(
-            user_ids_config["data_type"]
-        )
+
         self.item_ids_dtype = pb_utils.triton_string_to_numpy(
             item_ids_config["data_type"]
         )
@@ -59,9 +52,6 @@ class TritonPythonModel:
         )
         
     def convert_model_response_to_triton_response(self, model_responses):
-        user_ids = pd.DataFrame(
-            [recommendation.user_id for recommendation in model_responses]
-        )
         item_ids = pd.DataFrame(
             [recommendation.item_id for recommendation in model_responses]
         )
@@ -71,9 +61,6 @@ class TritonPythonModel:
 
         # Create output tensors. You need pb_utils.Tensor
         # objects to create pb_utils.InferenceResponse.
-        user_ids_tensor = pb_utils.Tensor(
-            "user_ids", user_ids.values.astype(self.user_ids_dtype)
-        )
         item_ids_tensor = pb_utils.Tensor(
             "item_ids", item_ids.values.astype(self.item_ids_dtype)
         )
@@ -82,18 +69,10 @@ class TritonPythonModel:
         )
 
         inference_response = pb_utils.InferenceResponse(
-            output_tensors=[user_ids_tensor, item_ids_tensor, scores_tensor]
+            output_tensors=[item_ids_tensor, scores_tensor]
         )
         return inference_response
 
-    def recommend(self, user_ids, top_n, filter_viewed):
-        recommendations = self.model.recommend(
-            user_ids=user_ids, top_n=top_n, filter_viewed=filter_viewed
-        )
-        inference_response = self.convert_model_response_to_triton_response(
-            recommendations
-        )
-        return inference_response
 
     def execute(self, requests):
         """`execute` MUST be implemented in every Python model. `execute`
@@ -119,18 +98,26 @@ class TritonPythonModel:
 
         # Every Python backend must iterate over everyone of the requests
         # and create a pb_utils.InferenceResponse for each of them.
-        print(f"{requests=}")
         for request in requests:
+
             user_ids = (
                 pb_utils.get_input_tensor_by_name(request, "user_ids")
-                .as_numpy().decode("utf-8")
+                .as_numpy()[0].decode("utf-8")
             )
             top_n = pb_utils.get_input_tensor_by_name(request, "top_n").as_numpy()[0]
             filter_viewed = (
                 pb_utils.get_input_tensor_by_name(request, "filter_viewed")
-                .as_numpy()
+                .as_numpy()[0]
             )
-            inference_response = self.recommend(user_ids, top_n, filter_viewed)
+
+            recommendations = self.model.recommend(
+                user_ids=user_ids, top_n=top_n, filter_viewed=filter_viewed
+            )
+            
+            inference_response = self.convert_model_response_to_triton_response(
+                recommendations
+            )
+            
             responses.append(inference_response)        
 
         # You should return a list of pb_utils.InferenceResponse. Length

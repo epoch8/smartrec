@@ -6,24 +6,18 @@ input [
     data_type: TYPE_STRING
     dims: [ 1 ]
     optional: true
-  }
-]
-input [
+  },
   {
     name: "item_ids"
     data_type: TYPE_STRING
     dims: [ 1 ]
     optional: true
-  }
-]
-input [
+  },
   {
     name: "top_n"
     data_type: TYPE_INT32
     dims: [ 1 ]
-  }
-]
-input [
+  },
   {
     name: "filter_viewed"
     data_type: TYPE_BOOL
@@ -31,12 +25,8 @@ input [
   }
 ]
 
+
 output [
-  {
-    name: "user_ids"
-    data_type: TYPE_STRING
-    dims: [ -1 ]
-  },
   {
     name: "item_ids"
     data_type: TYPE_STRING
