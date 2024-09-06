@@ -1,10 +1,10 @@
 import logging
 import os
+from token import OP
 import pandas as pd
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 
 import dill
-from rectools import Columns
 from implicit.als import AlternatingLeastSquares
 from pathy import Pathy
 from rectools.dataset import Dataset
@@ -18,7 +18,7 @@ from smartrec.lib.save_and_load_triton_models import (
     load_model,
     upload_model_files,
 )
-from smartrec.lib.model import ALSSettings, RecomItemUsers, RecomItem
+from smartrec.lib.model import ALSSettings, RecomItem
 
 logger = logging.getLogger(f"ALS Model")
 logger.setLevel(logging.INFO)
@@ -71,15 +71,16 @@ class RecommenderALS(RecommenderModel):
         user_ids: str,
         top_n: int = 20,
         filter_viewed: bool = True,
+        items_to_recommend: Optional[List[str]] = None,
     ) -> List[RecomItem]:  # Return type is a list of RecomItemUsers
         logger.info(f"Predicting for user {user_ids}")
-
         # user can be in the short memory, long memory or nowhere
         recos: pd.DataFrame = self.model.recommend(
             users=[user_ids],
             dataset=self.dataset,
             k=top_n,
             filter_viewed=filter_viewed,
+            items_to_recommend=items_to_recommend if items_to_recommend is None else list(items_to_recommend)
         )
         recos = recos.sort_values(['user_id', 'score'], ascending=False).reset_index(drop=True)  # Assuming 'user_id' is the column name
 
@@ -88,8 +89,7 @@ class RecommenderALS(RecommenderModel):
 
         # Group the DataFrame by user_id
         # grouped = recos.groupby('user_id')
-
-
+        
         reco_items = [
             RecomItem(item_id=str(row['item_id']), score=row['score'])
             for _, row in recos.iterrows()

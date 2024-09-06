@@ -2,6 +2,7 @@ import json
 import os
 
 import pandas as pd
+import numpy as np
 import triton_python_backend_utils as pb_utils
 from smartrec.lib.recommender_als import RecommenderALS
 
@@ -30,9 +31,7 @@ class TritonPythonModel:
 
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args["model_config"])
-        
-        print(f"{self.model_config=}")
-        
+                
         # Get item_ids configuration
         item_ids_config = pb_utils.get_output_config_by_name(model_config, "item_ids")
 
@@ -93,6 +92,7 @@ class TritonPythonModel:
           A list of pb_utils.InferenceResponse. The length of this list must
           be the same as `requests`
         """
+        decoder = np.vectorize(lambda x: x.decode('UTF-8'))
 
         responses = []
 
@@ -109,9 +109,26 @@ class TritonPythonModel:
                 pb_utils.get_input_tensor_by_name(request, "filter_viewed")
                 .as_numpy()[0]
             )
+            
+            item_ids = pb_utils.get_input_tensor_by_name(request, "item_ids")
+            if item_ids is not None:
+                item_ids = item_ids.as_numpy()[0].decode("utf-8")
+            else:
+                item_ids = None
+                
+            items_to_recommend = pb_utils.get_input_tensor_by_name(request, "items_to_recommend")
+            
+
+            if items_to_recommend is not None:
+                items_to_recommend = decoder(items_to_recommend.as_numpy())
+            else:
+                items_to_recommend = None
 
             recommendations = self.model.recommend(
-                user_ids=user_ids, top_n=top_n, filter_viewed=filter_viewed
+                user_ids=user_ids,
+                items_to_recommend=items_to_recommend,
+                top_n=top_n,
+                filter_viewed=filter_viewed,
             )
             
             inference_response = self.convert_model_response_to_triton_response(
