@@ -38,16 +38,12 @@ class TritonPythonModel:
         # Get scores configuration
         scores_config = pb_utils.get_output_config_by_name(model_config, "scores")
 
-        strategy_config = pb_utils.get_output_config_by_name(model_config, "strategy")
         # Convert Triton types to numpy types
-
         self.item_ids_dtype = pb_utils.triton_string_to_numpy(
             item_ids_config["data_type"]
         )
         self.scores_dtype = pb_utils.triton_string_to_numpy(scores_config["data_type"])
-        
-        self.strategy_dtype = pb_utils.triton_string_to_numpy(strategy_config["data_type"])
-        
+                
         script_path = os.path.dirname(os.path.abspath(__file__))
         self.model: RecommenderALS = RecommenderALS.load_model(
             load_dir=script_path
@@ -60,9 +56,6 @@ class TritonPythonModel:
         scores = pd.DataFrame(
             model_responses.scores
         )
-        strategy = pd.DataFrame(
-            [model_responses.strategy]
-        )
 
         # Create output tensors. You need pb_utils.Tensor
         # objects to create pb_utils.InferenceResponse.
@@ -72,12 +65,9 @@ class TritonPythonModel:
         scores_tensor = pb_utils.Tensor(
             "scores", scores.values.astype(self.scores_dtype)
         )
-        strategy_tensor = pb_utils.Tensor(
-            "strategy", strategy.values.astype(self.strategy_dtype)
-        )        
 
         inference_response = pb_utils.InferenceResponse(
-            output_tensors=[item_ids_tensor, scores_tensor, strategy_tensor]
+            output_tensors=[item_ids_tensor, scores_tensor]
         )
         return inference_response
 

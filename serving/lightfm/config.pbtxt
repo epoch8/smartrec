@@ -42,11 +42,6 @@ output [
     name: "scores"
     data_type: TYPE_FP32
     dims: [ -1 ]
-  },
-  {
-    name: "strategy"
-    data_type: TYPE_STRING
-    dims: [ 1 ]
   }
 ]
 
@@ -57,4 +52,4 @@ dynamic_batching {
 }
 
 instance_group [{ kind: KIND_CPU }]
-name: "als_build_ideas"
+name: "lightfm_build_ideas"

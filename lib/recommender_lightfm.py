@@ -3,6 +3,7 @@ import os
 from token import OP
 import pandas as pd
 from rectools import Columns
+from lightfm import LightFM
 from rectools.metrics import (
     Accuracy, NDCG, Precision, Recall, diversity, novelty,
     distances, calc_metrics, AvgRecPopularity, MAP, Serendipity
@@ -14,7 +15,7 @@ import dill
 from implicit.als import AlternatingLeastSquares
 from pathy import Pathy
 from rectools.dataset import Dataset
-from rectools.models import ImplicitALSWrapperModel, PopularModel
+from rectools.models import ImplicitALSWrapperModel, PopularModel, LightFMWrapperModel
 from rectools.dataset.identifiers import IdMap
 
 from smartrec.lib.base import RecommenderModel
@@ -26,12 +27,12 @@ from smartrec.lib.save_and_load_triton_models import (
 )
 from smartrec.lib.model import ALSSettings, RecomItems
 
-logger = logging.getLogger(f"ALS Model")
+logger = logging.getLogger(f"LightFM Model")
 logger.setLevel(logging.INFO)
 
 
-class RecommenderALS(RecommenderModel):
-    model_architecture = "als"
+class RecommenderLightFM(RecommenderModel):
+    model_architecture = "lightfm"
     
     def __init__(
         self,
@@ -46,7 +47,7 @@ class RecommenderALS(RecommenderModel):
         self.recsys_config = recsys_config
 
         # base and feature models
-        self.model: ImplicitALSWrapperModel = None
+        self.model: LightFMWrapperModel = None
         self.dataset: Dataset = None # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
@@ -56,25 +57,17 @@ class RecommenderALS(RecommenderModel):
 
         logger.info("Fitting model...")
 
-        self.model_hot_users = ImplicitALSWrapperModel(
-            AlternatingLeastSquares(
-                factors=self.recsys_config.ALS_FACTORS,
-                regularization=self.recsys_config.ALS_REGULARIZATION_FACTOR,
-                iterations=self.recsys_config.ALS_ITERATIONS,
-                alpha=self.recsys_config.ALS_ALPHA,
-                random_state=self.recsys_config.ALS_RANDOM_STATE,
+        self.model = LightFMWrapperModel(
+            model=LightFM(
+                no_components=self.recsys_config.LIGHTFM_NO_COMPONENTS,
+                loss=self.recsys_config.LIGHTFM_LOSS,
+                random_state=self.recsys_config.LIGHTFM_RANDOM_STATE,
             ),
-            fit_features_together=False,  # way to fit paired features
+            epochs=self.recsys_config.LIGHTFM_EPOCHS,
         )
-        self.model_hot_users.fit(dataset)
+        self.model.fit(dataset)
         self.user_id_map = dataset.user_id_map
         self.item_id_map = dataset.item_id_map
-        
-        self.model_cold_users = PopularModel(
-            popularity=self.recsys_config.POPULARITY_STRATEGY,
-            period=self.recsys_config.POPULARITY_PERIOD,
-        )
-        self.model_cold_users.fit(dataset)
         
         logger.info("Base models trained.")
         
@@ -87,32 +80,19 @@ class RecommenderALS(RecommenderModel):
     ) -> RecomItems:  # Return type is a RecomItems
         logger.info(f"Predicting for user {user_ids}")
         # user can be in the short memory, long memory or nowhere
-        if user_ids in self.user_id_map.external_ids:
-            recos: pd.DataFrame = self.model_hot_users.recommend(
-                users=[user_ids],
-                dataset=self.dataset,
-                k=top_n,
-                filter_viewed=filter_viewed,
-                items_to_recommend=items_to_recommend if items_to_recommend is None else list(items_to_recommend)
-            )
-            strategy = 'model_hot_users'
-        else:
-            logger.info("User is new, ")
-            recos: pd.DataFrame = self.model_cold_users.recommend(
-                users=[user_ids],
-                dataset=self.dataset,
-                k=top_n,
-                filter_viewed=filter_viewed,
-                items_to_recommend=items_to_recommend if items_to_recommend is None else list(items_to_recommend)
-            )
-            strategy = 'model_cold_users'
+        recos: pd.DataFrame = self.model.recommend(
+            users=[user_ids],
+            dataset=self.dataset,
+            k=top_n,
+            filter_viewed=filter_viewed,
+            items_to_recommend=items_to_recommend if items_to_recommend is None else list(items_to_recommend)
+        )
         
         recos = recos.sort_values(['user_id', 'score'], ascending=False).reset_index(drop=True)  # Assuming 'user_id' is the column name            
         
         return RecomItems(
             item_ids=recos.item_id.astype(str).tolist(),
             scores=recos.score.tolist(),
-            strategy=strategy,
         )
 
     def save_model_triton(self, base_s3_url: Pathy, num_to_keep: int) -> None:
@@ -133,7 +113,7 @@ class RecommenderALS(RecommenderModel):
         logger.info(f"Saving model to {base_s3_url}")
         upload_model_files(
             base_s3_url,
-            model_architecture = RecommenderALS.model_architecture,
+            model_architecture = RecommenderLightFM.model_architecture,
             model_name=self.model_name,
             model_version=self.model_version,
             model_data=self.__dict__,
@@ -167,20 +147,14 @@ class RecommenderALS(RecommenderModel):
         }
         
         models = {
-            "ALS_MODEL": ImplicitALSWrapperModel(
-                AlternatingLeastSquares(
-                    factors=self.recsys_config.ALS_FACTORS,
-                    regularization=self.recsys_config.ALS_REGULARIZATION_FACTOR,
-                    iterations=self.recsys_config.ALS_ITERATIONS,
-                    alpha=self.recsys_config.ALS_ALPHA,
-                    random_state=self.recsys_config.ALS_RANDOM_STATE,
+            "LIGHTFM_MODEL": LightFMWrapperModel(
+                model=LightFM(
+                    no_components=self.recsys_config.LIGHTFM_NO_COMPONENTS,
+                    loss=self.recsys_config.LIGHTFM_LOSS,
+                    random_state=self.recsys_config.LIGHTFM_RANDOM_STATE,
                 ),
-                fit_features_together=False,  # way to fit paired features
+                epochs=self.recsys_config.LIGHTFM_EPOCHS,
             ),
-            "POPULARITY_MODEL": PopularModel(
-                popularity=self.recsys_config.POPULARITY_STRATEGY,
-                period=self.recsys_config.POPULARITY_PERIOD,
-            )
         }
         
         n_splits = 3
