@@ -13,13 +13,12 @@ logger = logging.getLogger("ALS Model saving stage:")
 
 
 def upload_model_files(
-    base_s3_url: Pathy, model_architecture: str, model_version: str, model_name: str, model_data: io.BytesIO
+    base_s3_url: Pathy, model_version: str, model_name: str, model_data: io.BytesIO
 ) -> None:
     """
     Upload a new version of a model to the given base S3 URL.
 
     :param fs: fsspec filesystem object.
-    :param model_architecture: The name of arch (e.g., als).
     :param model_version: The version of the model.
     :param model_name: The name of the model.
     :param model_data: In-memory bytes of the model file.
@@ -33,7 +32,7 @@ def upload_model_files(
     # Check if the "models" folder exists
     if not fs.exists(models_folder_path / model_name):
         logger.info("Models folder does not exist, creating structure...")
-        create_initial_structure(base_s3_url, model_architecture, model_name)
+        create_initial_structure(base_s3_url, model_name)
 
     # Create the new version folder
     model_version_folder = models_folder_path / model_name / model_version
@@ -52,12 +51,11 @@ def upload_model_files(
     logger.info(f"Copied model.py for {model_name}, version {model_version}")
 
 
-def create_initial_structure(base_s3_url: Pathy, model_architecture: str, model_name: str) -> None:
+def create_initial_structure(base_s3_url: Pathy, model_name: str) -> None:
     """
     Create the initial structure in the S3 bucket by copying config.pbtxt and model.py from the serving folder.
 
     :param base_s3_url: The base URL in S3 (e.g., s3://bucket-name or s3://bucket-name/folder).
-    :param model_architecture: The name of arch (e.g., als).
     :param model_name: The name of the model.
     """
     fs, _ = fsspec.url_to_fs(base_s3_url)
@@ -66,27 +64,23 @@ def create_initial_structure(base_s3_url: Pathy, model_architecture: str, model_
     fs.makedirs(models_folder_path)
 
     # Copy config.pbtxt and model.py from the local serving folder
-    serving_config_path = SERVING_FOLDER_PATH / model_architecture / "config.pbtxt"
-    serving_model_path = SERVING_FOLDER_PATH / model_architecture / "model.py"
-    # serving_python_path = SERVING_FOLDER_PATH / model_architecture /"triton_python_backend_stub"
+    serving_config_path = SERVING_FOLDER_PATH / "config.pbtxt"
+    serving_model_path = SERVING_FOLDER_PATH / "model.py"
 
-    config_s3_path = models_folder_path / "config.pbtxt"
-    model_py_s3_path = models_folder_path / "model.py"
-    # python_s3_path = models_folder_path / "triton_python_backend_stub"
+    serving_config_s3_path = models_folder_path / "config.pbtxt"
+    serving_model_py_s3_path = models_folder_path / "model.py"
 
     logger.info("Creating initial structure with config.pbtxt and model.py...")
 
-    with fs.open(config_s3_path, "wb") as config_s3_file:
+    with fs.open(serving_config_s3_path, "wb") as config_s3_file:
         with open(serving_config_path, "rb") as local_config_file:
             config_s3_file.write(local_config_file.read())
 
-    with fs.open(model_py_s3_path, "wb") as model_s3_file:
+    with fs.open(serving_model_py_s3_path, "wb") as model_s3_file:
         with open(serving_model_path, "rb") as local_model_file:
             model_s3_file.write(local_model_file.read())
-
-    # with fs.open(python_s3_path, "wb") as model_s3_file:
-    #     with open(serving_python_path, "rb") as local_model_file:
-    #         model_s3_file.write(local_model_file.read())
+    
+    edit_config_pbtxt(base_s3_url=base_s3_url, model_name=model_name)
 
     logger.info("Initial structure created successfully.")
 
@@ -183,7 +177,7 @@ def copy_file(base_s3_url: Pathy, src_file_path: str, new_file_path: str) -> str
     return dst_url
 
 
-def load_model(base_s3_url: Pathy, model_name: str) -> tuple:
+def load_model_s3(base_s3_url: Pathy, model_name: str) -> tuple:
     """
     Load the latest version of a model from the bucket.
 

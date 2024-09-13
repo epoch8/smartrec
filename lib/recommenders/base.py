@@ -1,15 +1,14 @@
-import os
 import logging
+import os
+from abc import abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
 
-from pathy import Pathy
 import dill
-from smartrec.lib.model import RecomItems
-
 import pandas as pd
+from pathy import Pathy
 
-from smartrec.lib.save_and_load_triton_models import load_model
-
+from smartrec.lib.model import RecomItems
+from smartrec.lib.save_and_load_triton_models import load_model_s3
 
 logger = logging.getLogger(f"Base Model")
 logger.setLevel(logging.INFO)
@@ -22,42 +21,21 @@ class RecommenderModel:
     def __init__(self) -> None:
         pass
 
-    def save_model(self, save_dir: str) -> None:
-        raise NotImplementedError()
-
-    @classmethod
-    def load_model(cls, load_dir: str) -> "RecommenderModel":
-        raise NotImplementedError()
-
-    @classmethod
-    def get_train_data(cls) -> pd.DataFrame:
-        raise NotImplementedError()
-
-    @classmethod
+    @abstractmethod
     def train(cls, train) -> "RecommenderModel":
         raise NotImplementedError()
-
-    def status(self) -> Dict[str, Any]:
-        raise NotImplementedError()
     
+    @abstractmethod
     def calc_metrics(self) -> Dict[str, Any]:
-        raise NotImplementedError() 
+        raise NotImplementedError()
 
+    @abstractmethod
     def recommend(
         self,
-        user_id: str,
-        user_history: List[str],
+        user_ids: str,
         top_n: int,
-        filter_already_liked_items: bool,
-        items: Optional[List[str]],
-    ) -> RecomItems:
-        raise NotImplementedError()
-
-    def look_alike_items(
-        self,
-        item_id: str,
-        top_n: int = 5,
-        items: Optional[List[str]] = None,
+        filter_viewed: bool,
+        items_to_recommend: Optional[List[str]],
     ) -> RecomItems:
         raise NotImplementedError()
 
@@ -121,7 +99,7 @@ class RecommenderModel:
             RecommenderModel: The loaded model instance.
         """
         # Assuming load_model is a function that returns a state dictionary
-        state_dict = load_model(base_s3_url=base_s3_url, model_name=model_name)
+        state_dict = load_model_s3(base_s3_url=base_s3_url, model_name=model_name)
         
         # Create a new instance of RecommenderModel
         instance = cls()

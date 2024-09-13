@@ -1,7 +1,8 @@
 import logging
-from typing import List, Dict, Optional
-import numpy as np
+from typing import Dict, List, Optional
 from urllib.parse import urlparse
+
+import numpy as np
 from tritonclient.utils import InferenceServerException
 
 logger = logging.getLogger(f"ALS Model")

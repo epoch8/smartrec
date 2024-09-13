@@ -1,11 +1,17 @@
 import json
 import os
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import triton_python_backend_utils as pb_utils
-from smartrec.lib.recommender_als import RecommenderALS
 
+from smartrec.lib.recommenders import (
+    RecommenderALS,
+    RecommenderLightFM,
+    RecommenderModel,
+    RecommenderPopular,
+    RecommenderRandom,
+)
 
 
 class TritonPythonModel:
@@ -49,9 +55,24 @@ class TritonPythonModel:
         self.strategy_dtype = pb_utils.triton_string_to_numpy(strategy_config["data_type"])
         
         script_path = os.path.dirname(os.path.abspath(__file__))
-        self.model: RecommenderALS = RecommenderALS.load_model(
-            load_dir=script_path
-        )
+        
+        # TODO переделать
+        if 'als' in self.model_config['name']:
+            self.model = RecommenderALS.load_model(
+                load_dir=script_path
+            )
+        if 'lightfm' in self.model_config['name']:
+            self.model = RecommenderLightFM.load_model(
+                load_dir=script_path
+            )
+        if 'popular' in self.model_config['name']:
+            self.model = RecommenderPopular.load_model(
+                load_dir=script_path
+            )
+        if 'random' in self.model_config['name']:
+            self.model = RecommenderRandom.load_model(
+                load_dir=script_path
+            )
         
     def convert_model_response_to_triton_response(self, model_responses):
         item_ids = pd.DataFrame(
