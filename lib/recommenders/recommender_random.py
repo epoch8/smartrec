@@ -16,9 +16,9 @@ from rectools.metrics import (
 from rectools.model_selection import TimeRangeSplitter, cross_validate
 from rectools.models import RandomModel
 
-from smartrec.lib.model import RandomSettings, RecomItems
-from smartrec.lib.recommenders import RecommenderModel
-from smartrec.lib.save_and_load_triton_models import (
+from lib.model import RandomSettings, RecomItems
+from lib.recommenders import RecommenderModel
+from lib.save_and_load_triton_models import (
     clean_old_model_versions,
     upload_model_files,
 )

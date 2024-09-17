@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import triton_python_backend_utils as pb_utils
 
-from smartrec.lib.recommenders import (
+from lib.recommenders import (
     RecommenderALS,
     RecommenderLightFM,
     RecommenderModel,

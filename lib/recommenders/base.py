@@ -7,8 +7,8 @@ import dill
 import pandas as pd
 from pathy import Pathy
 
-from smartrec.lib.model import RecomItems
-from smartrec.lib.save_and_load_triton_models import load_model_s3
+from lib.model import RecomItems
+from lib.save_and_load_triton_models import load_model_s3
 
 logger = logging.getLogger(f"Base Model")
 logger.setLevel(logging.INFO)
