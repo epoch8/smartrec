@@ -22,10 +22,12 @@ jobs:
         git lfs pull
     - name: Install poetry
       run: pip install poetry
-    - name: Install dependencies
+    - name: Install deps for poetry install
       run: |
         pip install pip setuptools wheel
         pip wheel --no-cache-dir --use-pep517 "lightfm (==1.17)"
+    - name: Install dependencies
+      run: |
         poetry install --all-extras
     - name: Lint with flake8
       run: |
