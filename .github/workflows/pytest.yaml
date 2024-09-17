@@ -25,7 +25,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install pip setuptools wheel
-        pip install --no-use-pep517 lightfm
+        pip wheel --no-cache-dir --use-pep517 "lightfm (==1.17)"
         poetry install --all-extras
     - name: Lint with flake8
       run: |
