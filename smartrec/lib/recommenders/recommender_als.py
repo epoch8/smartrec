@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional
 
 import pandas as pd
+from implicit.als import AlternatingLeastSquares
 from pathy import Pathy
 from rectools.dataset import Dataset
 from rectools.dataset.identifiers import IdMap
@@ -14,25 +15,25 @@ from rectools.metrics import (
     novelty,
 )
 from rectools.model_selection import TimeRangeSplitter, cross_validate
-from rectools.models import RandomModel
+from rectools.models import ImplicitALSWrapperModel, PopularModel
 
-from lib.model import RandomSettings, RecomItems
-from lib.recommenders import RecommenderModel
-from lib.save_and_load_triton_models import (
+from smartrec.lib.model import ALSSettings, RecomItems
+from smartrec.lib.recommenders import RecommenderModel
+from smartrec.lib.save_and_load_triton_models import (
     clean_old_model_versions,
     upload_model_files,
 )
 
-logger = logging.getLogger(f"Random Model")
+logger = logging.getLogger(f"ALS Model")
 logger.setLevel(logging.INFO)
 
 
-class RecommenderRandom(RecommenderModel):
-    model_architecture = "random"
+class RecommenderALS(RecommenderModel):
+    model_architecture = "als"
     
     def __init__(
         self,
-        recsys_config: Optional[RandomSettings] = None,
+        recsys_config: Optional[ALSSettings] = None,
         model_name: Optional[str] = None,
         model_version: Optional[str] = None,
     ) -> None:
@@ -43,23 +44,35 @@ class RecommenderRandom(RecommenderModel):
         self.recsys_config = recsys_config
 
         # base and feature models
-        self.model: RandomModel = None
+        self.model: ImplicitALSWrapperModel = None
         self.dataset: Dataset = None # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
-        self.strategy = 'model_hot_and_cold_users'
 
     def train(self, dataset: Dataset):
         self.dataset = dataset
 
         logger.info("Fitting model...")
 
-        self.model = RandomModel(
-            random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE
+        self.model_hot_users = ImplicitALSWrapperModel(
+            AlternatingLeastSquares(
+                factors=self.recsys_config.ALS_FACTORS,
+                regularization=self.recsys_config.ALS_REGULARIZATION_FACTOR,
+                iterations=self.recsys_config.ALS_ITERATIONS,
+                alpha=self.recsys_config.ALS_ALPHA,
+                random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE,
+            ),
+            fit_features_together=False,  # way to fit paired features
         )
-        self.model.fit(dataset)
+        self.model_hot_users.fit(dataset)
         self.user_id_map = dataset.user_id_map
         self.item_id_map = dataset.item_id_map
+        
+        self.model_cold_users = PopularModel(
+            popularity=self.recsys_config.POPULARITY_STRATEGY,
+            period=self.recsys_config.POPULARITY_PERIOD,
+        )
+        self.model_cold_users.fit(dataset)
         
         logger.info("Base models trained.")
         
@@ -72,20 +85,32 @@ class RecommenderRandom(RecommenderModel):
     ) -> RecomItems:  # Return type is a RecomItems
         logger.info(f"Predicting for user {user_ids}")
         # user can be in the short memory, long memory or nowhere
-        recos: pd.DataFrame = self.model.recommend(
-            users=[user_ids],
-            dataset=self.dataset,
-            k=top_n,
-            filter_viewed=filter_viewed,
-            items_to_recommend=items_to_recommend if items_to_recommend is None else list(items_to_recommend)
-        )
+        if user_ids in self.user_id_map.external_ids:
+            recos: pd.DataFrame = self.model_hot_users.recommend(
+                users=[user_ids],
+                dataset=self.dataset,
+                k=top_n,
+                filter_viewed=filter_viewed,
+                items_to_recommend=items_to_recommend if items_to_recommend is None else list(items_to_recommend)
+            )
+            strategy = 'model_hot_users'
+        else:
+            logger.info("User is new, ")
+            recos: pd.DataFrame = self.model_cold_users.recommend(
+                users=[user_ids],
+                dataset=self.dataset,
+                k=top_n,
+                filter_viewed=filter_viewed,
+                items_to_recommend=items_to_recommend if items_to_recommend is None else list(items_to_recommend)
+            )
+            strategy = 'model_cold_users'
         
         recos = recos.sort_values(['user_id', 'score'], ascending=False).reset_index(drop=True)  # Assuming 'user_id' is the column name            
         
         return RecomItems(
             item_ids=recos.item_id.astype(str).tolist(),
             scores=recos.score.tolist(),
-            strategy=self.strategy,
+            strategy=strategy,
         )
 
     def save_model_triton(self, base_s3_url: Pathy, num_to_keep: int) -> None:
@@ -135,8 +160,19 @@ class RecommenderRandom(RecommenderModel):
         }
         
         models = {
-            "RANDOM_MODEL": RandomModel(
-                random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE
+            "ALS_MODEL": ImplicitALSWrapperModel(
+                AlternatingLeastSquares(
+                    factors=self.recsys_config.ALS_FACTORS,
+                    regularization=self.recsys_config.ALS_REGULARIZATION_FACTOR,
+                    iterations=self.recsys_config.ALS_ITERATIONS,
+                    alpha=self.recsys_config.ALS_ALPHA,
+                    random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE,
+                ),
+                fit_features_together=False,  # way to fit paired features
+            ),
+            "POPULARITY_MODEL": PopularModel(
+                popularity=self.recsys_config.POPULARITY_STRATEGY,
+                period=self.recsys_config.POPULARITY_PERIOD,
             )
         }
         

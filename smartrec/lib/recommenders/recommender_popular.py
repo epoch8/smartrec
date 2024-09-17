@@ -16,9 +16,9 @@ from rectools.metrics import (
 from rectools.model_selection import TimeRangeSplitter, cross_validate
 from rectools.models import PopularModel
 
-from lib.model import PopularSettings, RecomItems
-from lib.recommenders import RecommenderModel
-from lib.save_and_load_triton_models import (
+from smartrec.lib.model import PopularSettings, RecomItems
+from smartrec.lib.recommenders import RecommenderModel
+from smartrec.lib.save_and_load_triton_models import (
     clean_old_model_versions,
     upload_model_files,
 )

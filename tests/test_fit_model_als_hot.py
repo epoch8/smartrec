@@ -5,8 +5,8 @@ from rectools import Columns
 from pydantic import BaseModel
 from rectools.dataset import Dataset
 from datetime import datetime, timedelta
-from lib.model import ALSSettings
-from lib.recommenders import RecommenderALS
+from smartrec.lib.model import ALSSettings
+from smartrec.lib.recommenders import RecommenderALS
 
 
 recsys_config_als = ALSSettings(
