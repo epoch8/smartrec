@@ -24,8 +24,8 @@ jobs:
       run: pip install poetry
     - name: Install deps for poetry install
       run: |
-        pip install pip setuptools wheel
-        pip wheel --no-cache-dir --use-pep517 "lightfm (==1.17)"
+        python -m pip install --upgrade pip setuptools wheel
+        python -m pip install --no-use-pep517 lightfm
     - name: Install dependencies
       run: |
         poetry install --all-extras
