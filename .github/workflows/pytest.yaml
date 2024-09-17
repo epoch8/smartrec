@@ -24,6 +24,7 @@ jobs:
       run: pip install poetry
     - name: Install dependencies
       run: |
+        pip install --no-use-pep517 lightfm
         poetry install --all-extras
     - name: Lint with flake8
       run: |
