@@ -21,7 +21,7 @@ jobs:
         git lfs fetch
         git lfs pull
     - name: Install poetry
-      run: pip install poetry
+      run: pip install poetry==1.8.3
     - name: Install deps for poetry install
       run: |
         python3 -m pip install --upgrade pip setuptools wheel
