@@ -1,13 +1,14 @@
-import pytest
-from pathlib import Path
-import pandas as pd
-from rectools import Columns
-from pydantic import BaseModel
-from rectools.dataset import Dataset
 from datetime import datetime, timedelta
+from pathlib import Path
+
+import pandas as pd
+import pytest
+from pydantic import BaseModel
+from rectools import Columns
+from rectools.dataset import Dataset
+
 from smartrec.lib.model import ALSSettings
 from smartrec.lib.recommenders import RecommenderALS
-
 
 recsys_config_als = ALSSettings(
     ALS_ITERATIONS=10,
