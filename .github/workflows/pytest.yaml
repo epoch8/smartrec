@@ -29,6 +29,7 @@ jobs:
         python3 -m pip install --no-use-pep517 lightfm
     - name: Install libs
       run: |
+        pip3 wheel --no-cache-dir --use-pep517 "lightfm (==1.17)"
         poetry install --all-extras
     - name: Lint with flake8
       run: |
