@@ -7,8 +7,8 @@ from pydantic import BaseModel
 from rectools import Columns
 from rectools.dataset import Dataset
 
-from smartrec.lib.model import ALSSettings
-from smartrec.lib.recommenders import RecommenderALS
+from smartrec.smartrec_lib.model import ALSSettings
+from smartrec.smartrec_lib.recommenders import RecommenderALS
 
 recsys_config_als = ALSSettings(
     ALS_ITERATIONS=10,

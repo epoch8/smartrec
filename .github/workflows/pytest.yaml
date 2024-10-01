@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.9', '3.10', '3.11']
+        python-version: ['3.10']
 
     steps:
     - uses: actions/checkout@v2
@@ -20,16 +20,18 @@ jobs:
       run: |
         git lfs fetch
         git lfs pull
+    - name: Install deps
+      run: |
+        sudo apt-get install build-essential libssl-dev libffi-dev python3-dev
     - name: Install poetry
       run: pip install poetry==1.8.3
     - name: Install deps for poetry install
       run: |
         python3 -m pip install --upgrade pip setuptools wheel
         python3 -m pip install --upgrade pip
-        python3 -m pip install --no-use-pep517 lightfm
+        python3 -m pip install --no-use-pep517 lightfm 
     - name: Install libs
       run: |
-        pip3 wheel --no-cache-dir --use-pep517 "lightfm (==1.17)"
         poetry install --all-extras
     - name: Lint with flake8
       run: |

@@ -7,7 +7,7 @@ import fsspec
 from pathy import Pathy
 
 CURRENT_DIR = Path(__file__).parent
-SERVING_FOLDER_PATH = CURRENT_DIR.parent / "serving"
+SERVING_FOLDER_PATH = CURRENT_DIR.parent / "smartrec_lib/serving"
 
 logger = logging.getLogger("ALS Model saving stage:")
 
@@ -66,7 +66,7 @@ def create_initial_structure(base_s3_url: Pathy, model_name: str) -> None:
     # Copy config.pbtxt and model.py from the local serving folder
     serving_config_path = SERVING_FOLDER_PATH / "config.pbtxt"
     serving_model_path = SERVING_FOLDER_PATH / "model.py"
-
+    
     serving_config_s3_path = models_folder_path / "config.pbtxt"
     serving_model_py_s3_path = models_folder_path / "model.py"
 
@@ -97,7 +97,7 @@ def copy_model_py(src_folder: Pathy, dest_folder: Pathy) -> None:
 
     src_model_py_path = src_folder / "model.py"
     dest_model_py_path = dest_folder / "model.py"
-
+    
     fs.copy(str(src_model_py_path), str(dest_model_py_path))
 
 

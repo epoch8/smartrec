@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional
 
 import pandas as pd
+from lightfm import LightFM
 from pathy import Pathy
 from rectools.dataset import Dataset
 from rectools.dataset.identifiers import IdMap
@@ -14,25 +15,25 @@ from rectools.metrics import (
     novelty,
 )
 from rectools.model_selection import TimeRangeSplitter, cross_validate
-from rectools.models import RandomModel
+from rectools.models import LightFMWrapperModel
 
-from smartrec.lib.model import RandomSettings, RecomItems
-from smartrec.lib.recommenders import RecommenderModel
-from smartrec.lib.save_and_load_triton_models import (
+from smartrec_lib.model import LighFMSettings, RecomItems
+from smartrec_lib.recommenders import RecommenderModel
+from smartrec_lib.save_and_load_triton_models import (
     clean_old_model_versions,
     upload_model_files,
 )
 
-logger = logging.getLogger(f"Random Model")
+logger = logging.getLogger(f"LightFM Model")
 logger.setLevel(logging.INFO)
 
 
-class RecommenderRandom(RecommenderModel):
-    model_architecture = "random"
+class RecommenderLightFM(RecommenderModel):
+    model_architecture = "lightfm"
     
     def __init__(
         self,
-        recsys_config: Optional[RandomSettings] = None,
+        recsys_config: Optional[LighFMSettings] = None,
         model_name: Optional[str] = None,
         model_version: Optional[str] = None,
     ) -> None:
@@ -43,7 +44,7 @@ class RecommenderRandom(RecommenderModel):
         self.recsys_config = recsys_config
 
         # base and feature models
-        self.model: RandomModel = None
+        self.model: LightFMWrapperModel = None
         self.dataset: Dataset = None # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
@@ -54,8 +55,13 @@ class RecommenderRandom(RecommenderModel):
 
         logger.info("Fitting model...")
 
-        self.model = RandomModel(
-            random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE
+        self.model = LightFMWrapperModel(
+            model=LightFM(
+                no_components=self.recsys_config.LIGHTFM_NO_COMPONENTS,
+                loss=self.recsys_config.LIGHTFM_LOSS,
+                random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE,
+            ),
+            epochs=self.recsys_config.LIGHTFM_EPOCHS,
         )
         self.model.fit(dataset)
         self.user_id_map = dataset.user_id_map
@@ -135,9 +141,14 @@ class RecommenderRandom(RecommenderModel):
         }
         
         models = {
-            "RANDOM_MODEL": RandomModel(
-                random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE
-            )
+            "LIGHTFM_MODEL": LightFMWrapperModel(
+                model=LightFM(
+                    no_components=self.recsys_config.LIGHTFM_NO_COMPONENTS,
+                    loss=self.recsys_config.LIGHTFM_LOSS,
+                    random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE,
+                ),
+                epochs=self.recsys_config.LIGHTFM_EPOCHS,
+            ),
         }
         
         n_splits = 3
