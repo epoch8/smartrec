@@ -2,8 +2,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
-import pytest
-from pydantic import BaseModel
 from rectools import Columns
 from rectools.dataset import Dataset
 
@@ -22,14 +20,15 @@ recsys_config_als = ALSSettings(
 )
 
 test_data = Path(__file__).parent
-    
+
+
 def test_fit_als():
     df_interactions = pd.read_csv(
         test_data / "interactions.csv",
         header=0,
         names=[Columns.User, Columns.Item, Columns.Weight, Columns.Datetime],
     )
-    
+
     train_dataset = Dataset.construct(
         interactions_df=df_interactions,
     )
@@ -41,10 +40,10 @@ def test_fit_als():
         model_version=model_version,
         recsys_config=recsys_config_als,
     )
-    
+
     # metrics = model.calc_metrics(k=10, dataset=train_dataset)
     model.train(train_dataset)
-    
+
     predictions = model.recommend(
         user_ids=1,
         top_n=3,
@@ -52,6 +51,10 @@ def test_fit_als():
     )
     print(predictions)
     assert df_interactions.shape[0] == 100
-    assert predictions.item_ids == ['589', '1253', '3578']
-    assert predictions.scores == [0.0011700484901666641, 0.0011568143963813782, 0.0011557340621948242]
-    assert predictions.strategy == 'model_hot_users'
+    assert predictions.item_ids == ["589", "1253", "3578"]
+    assert predictions.scores == [
+        0.0011700484901666641,
+        0.0011568143963813782,
+        0.0011557340621948242,
+    ]
+    assert predictions.strategy == "model_hot_users"

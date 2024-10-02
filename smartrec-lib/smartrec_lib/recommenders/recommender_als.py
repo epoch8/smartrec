@@ -24,13 +24,13 @@ from smartrec_lib.save_and_load_triton_models import (
     upload_model_files,
 )
 
-logger = logging.getLogger(f"ALS Model")
+logger = logging.getLogger("ALS Model")
 logger.setLevel(logging.INFO)
 
 
 class RecommenderALS(RecommenderModel):
     model_architecture = "als"
-    
+
     def __init__(
         self,
         recsys_config: Optional[ALSSettings] = None,
@@ -45,7 +45,7 @@ class RecommenderALS(RecommenderModel):
 
         # base and feature models
         self.model: ImplicitALSWrapperModel = None
-        self.dataset: Dataset = None # might take unnecessary memory
+        self.dataset: Dataset = None  # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
 
@@ -67,15 +67,15 @@ class RecommenderALS(RecommenderModel):
         self.model_hot_users.fit(dataset)
         self.user_id_map = dataset.user_id_map
         self.item_id_map = dataset.item_id_map
-        
+
         self.model_cold_users = PopularModel(
             popularity=self.recsys_config.POPULARITY_STRATEGY,
             period=self.recsys_config.POPULARITY_PERIOD,
         )
         self.model_cold_users.fit(dataset)
-        
+
         logger.info("Base models trained.")
-        
+
     def recommend(
         self,
         user_ids: str,
@@ -91,9 +91,13 @@ class RecommenderALS(RecommenderModel):
                 dataset=self.dataset,
                 k=top_n,
                 filter_viewed=filter_viewed,
-                items_to_recommend=items_to_recommend if items_to_recommend is None else list(items_to_recommend)
+                items_to_recommend=(
+                    items_to_recommend
+                    if items_to_recommend is None
+                    else list(items_to_recommend)
+                ),
             )
-            strategy = 'model_hot_users'
+            strategy = "model_hot_users"
         else:
             logger.info("User is new, ")
             recos: pd.DataFrame = self.model_cold_users.recommend(
@@ -101,12 +105,18 @@ class RecommenderALS(RecommenderModel):
                 dataset=self.dataset,
                 k=top_n,
                 filter_viewed=filter_viewed,
-                items_to_recommend=items_to_recommend if items_to_recommend is None else list(items_to_recommend)
+                items_to_recommend=(
+                    items_to_recommend
+                    if items_to_recommend is None
+                    else list(items_to_recommend)
+                ),
             )
-            strategy = 'model_cold_users'
-        
-        recos = recos.sort_values(['user_id', 'score'], ascending=False).reset_index(drop=True)  # Assuming 'user_id' is the column name            
-        
+            strategy = "model_cold_users"
+
+        recos = recos.sort_values(["user_id", "score"], ascending=False).reset_index(
+            drop=True
+        )  # Assuming 'user_id' is the column name
+
         return RecomItems(
             item_ids=recos.item_id.astype(str).tolist(),
             scores=recos.score.tolist(),
@@ -135,30 +145,24 @@ class RecommenderALS(RecommenderModel):
             model_version=self.model_version,
             model_data=self.__dict__,
         )
-        logger.info(f"Model saved successfully!")
+        logger.info("Model saved successfully!")
         clean_old_model_versions(
-            base_s3_url=base_s3_url, 
-            model_name=self.model_name, 
-            num_to_keep=num_to_keep
+            base_s3_url=base_s3_url, model_name=self.model_name, num_to_keep=num_to_keep
         )
-        logger.info(f"Old models deleted!")
+        logger.info("Old models deleted!")
 
         return None
 
-    def calc_metrics(
-        self, 
-        k: int,
-        dataset: Dataset
-    ):
+    def calc_metrics(self, k: int, dataset: Dataset):
         metrics = {
-            f'serendipity@{k}': Serendipity(k=k),
-            f'map@{k}': MAP(k=k),
-            f'precision@{k}': Precision(k=k),
-            f'recall@{k}': Recall(k=k),
-            f'avgrecpopularity@{k}': AvgRecPopularity(k=1),
-            f'novelty@{k}': novelty.NoveltyMetric(k=k),
+            f"serendipity@{k}": Serendipity(k=k),
+            f"map@{k}": MAP(k=k),
+            f"precision@{k}": Precision(k=k),
+            f"recall@{k}": Recall(k=k),
+            f"avgrecpopularity@{k}": AvgRecPopularity(k=1),
+            f"novelty@{k}": novelty.NoveltyMetric(k=k),
         }
-        
+
         models = {
             "ALS_MODEL": ImplicitALSWrapperModel(
                 AlternatingLeastSquares(
@@ -173,9 +177,9 @@ class RecommenderALS(RecommenderModel):
             "POPULARITY_MODEL": PopularModel(
                 popularity=self.recsys_config.POPULARITY_STRATEGY,
                 period=self.recsys_config.POPULARITY_PERIOD,
-            )
+            ),
         }
-        
+
         n_splits = 3
 
         splitter = TimeRangeSplitter(
@@ -185,7 +189,7 @@ class RecommenderALS(RecommenderModel):
             filter_cold_items=True,
             filter_cold_users=True,
         )
-        
+
         cv_results = cross_validate(
             dataset=dataset,
             splitter=splitter,
@@ -194,7 +198,7 @@ class RecommenderALS(RecommenderModel):
             k=k,
             filter_viewed=True,
         )
-        
+
         logger.info(f"The resutls of cross validate are - {cv_results}")
-        
+
         return cv_results

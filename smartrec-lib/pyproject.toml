@@ -21,6 +21,8 @@ pathy = "^0.11.0"
 [tool.poetry.group.dev.dependencies]
 pytest = "*"
 flake8 = "*"
+isort = "*"
+black = "*"
 
 
 [tool.isort]

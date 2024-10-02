@@ -1,16 +1,15 @@
 import logging
 import os
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import dill
-import pandas as pd
 from pathy import Pathy
 
 from smartrec_lib.model import RecomItems
 from smartrec_lib.save_and_load_triton_models import load_model_s3
 
-logger = logging.getLogger(f"Base Model")
+logger = logging.getLogger("Base Model")
 logger.setLevel(logging.INFO)
 
 
@@ -24,7 +23,7 @@ class RecommenderModel:
     @abstractmethod
     def train(cls, train) -> "RecommenderModel":
         raise NotImplementedError()
-    
+
     @abstractmethod
     def calc_metrics(self) -> Dict[str, Any]:
         raise NotImplementedError()
@@ -55,7 +54,7 @@ class RecommenderModel:
 
         with open(os.path.join(save_dir, "model.pkl"), "wb") as file:
             dill.dump(self.__dict__, file)
-        logger.info(f"Model saved successfully!")
+        logger.info("Model saved successfully!")
 
     @classmethod
     def load_model(
@@ -72,20 +71,19 @@ class RecommenderModel:
             RecommenderModel: The loaded model.
         """
         logger.info("Trying to load model from pkl")
-    
+
         with open(os.path.join(load_dir, "model.pkl"), "rb") as file:
             state_dict = dill.load(file)
-        
+
         # Create a new instance of RecommenderModel
         instance = cls()
-        
+
         # Update the instance's __dict__ with the state_dict
         instance.__dict__.update(state_dict)
-        
+
         logger.info("Model loaded successfully!")
         return instance
 
-    
     @classmethod
     def load_model_triton(cls, base_s3_url: Pathy, model_name: str):
         """
@@ -100,13 +98,13 @@ class RecommenderModel:
         """
         # Assuming load_model is a function that returns a state dictionary
         state_dict = load_model_s3(base_s3_url=base_s3_url, model_name=model_name)
-        
+
         # Create a new instance of RecommenderModel
         instance = cls()
-        
+
         # Update the instance's __dict__ with the state_dict
         instance.__dict__.update(state_dict)
-        
+
         logger.info("Model loaded successfully!")
-        
+
         return instance

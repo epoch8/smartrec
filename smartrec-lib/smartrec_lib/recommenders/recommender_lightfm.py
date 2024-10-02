@@ -24,13 +24,13 @@ from smartrec_lib.save_and_load_triton_models import (
     upload_model_files,
 )
 
-logger = logging.getLogger(f"LightFM Model")
+logger = logging.getLogger("LightFM Model")
 logger.setLevel(logging.INFO)
 
 
 class RecommenderLightFM(RecommenderModel):
     model_architecture = "lightfm"
-    
+
     def __init__(
         self,
         recsys_config: Optional[LighFMSettings] = None,
@@ -45,10 +45,10 @@ class RecommenderLightFM(RecommenderModel):
 
         # base and feature models
         self.model: LightFMWrapperModel = None
-        self.dataset: Dataset = None # might take unnecessary memory
+        self.dataset: Dataset = None  # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
-        self.strategy = 'model_hot_and_cold_users'
+        self.strategy = "model_hot_and_cold_users"
 
     def train(self, dataset: Dataset):
         self.dataset = dataset
@@ -66,9 +66,9 @@ class RecommenderLightFM(RecommenderModel):
         self.model.fit(dataset)
         self.user_id_map = dataset.user_id_map
         self.item_id_map = dataset.item_id_map
-        
+
         logger.info("Base models trained.")
-        
+
     def recommend(
         self,
         user_ids: str,
@@ -83,11 +83,17 @@ class RecommenderLightFM(RecommenderModel):
             dataset=self.dataset,
             k=top_n,
             filter_viewed=filter_viewed,
-            items_to_recommend=items_to_recommend if items_to_recommend is None else list(items_to_recommend)
+            items_to_recommend=(
+                items_to_recommend
+                if items_to_recommend is None
+                else list(items_to_recommend)
+            ),
         )
-        
-        recos = recos.sort_values(['user_id', 'score'], ascending=False).reset_index(drop=True)  # Assuming 'user_id' is the column name            
-        
+
+        recos = recos.sort_values(["user_id", "score"], ascending=False).reset_index(
+            drop=True
+        )  # Assuming 'user_id' is the column name
+
         return RecomItems(
             item_ids=recos.item_id.astype(str).tolist(),
             scores=recos.score.tolist(),
@@ -116,30 +122,24 @@ class RecommenderLightFM(RecommenderModel):
             model_version=self.model_version,
             model_data=self.__dict__,
         )
-        logger.info(f"Model saved successfully!")
+        logger.info("Model saved successfully!")
         clean_old_model_versions(
-            base_s3_url=base_s3_url, 
-            model_name=self.model_name, 
-            num_to_keep=num_to_keep
+            base_s3_url=base_s3_url, model_name=self.model_name, num_to_keep=num_to_keep
         )
-        logger.info(f"Old models deleted!")
+        logger.info("Old models deleted!")
 
         return None
 
-    def calc_metrics(
-        self, 
-        k: int,
-        dataset: Dataset
-    ):
+    def calc_metrics(self, k: int, dataset: Dataset):
         metrics = {
-            f'serendipity@{k}': Serendipity(k=k),
-            f'map@{k}': MAP(k=k),
-            f'precision@{k}': Precision(k=k),
-            f'recall@{k}': Recall(k=k),
-            f'avgrecpopularity@{k}': AvgRecPopularity(k=1),
-            f'novelty@{k}': novelty.NoveltyMetric(k=k),
+            f"serendipity@{k}": Serendipity(k=k),
+            f"map@{k}": MAP(k=k),
+            f"precision@{k}": Precision(k=k),
+            f"recall@{k}": Recall(k=k),
+            f"avgrecpopularity@{k}": AvgRecPopularity(k=1),
+            f"novelty@{k}": novelty.NoveltyMetric(k=k),
         }
-        
+
         models = {
             "LIGHTFM_MODEL": LightFMWrapperModel(
                 model=LightFM(
@@ -150,7 +150,7 @@ class RecommenderLightFM(RecommenderModel):
                 epochs=self.recsys_config.LIGHTFM_EPOCHS,
             ),
         }
-        
+
         n_splits = 3
 
         splitter = TimeRangeSplitter(
@@ -160,7 +160,7 @@ class RecommenderLightFM(RecommenderModel):
             filter_cold_items=True,
             filter_cold_users=True,
         )
-        
+
         cv_results = cross_validate(
             dataset=dataset,
             splitter=splitter,
@@ -169,7 +169,7 @@ class RecommenderLightFM(RecommenderModel):
             k=k,
             filter_viewed=True,
         )
-        
+
         logger.info(f"The resutls of cross validate are - {cv_results}")
-        
+
         return cv_results

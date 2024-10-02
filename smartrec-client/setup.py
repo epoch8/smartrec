@@ -13,6 +13,5 @@ setuptools.setup(
             "flake8",
             "mypy",
         ],
- 
     },
 )
