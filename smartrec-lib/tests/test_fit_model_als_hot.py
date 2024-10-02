@@ -33,7 +33,7 @@ def test_fit_als():
         interactions_df=df_interactions,
     )
 
-    model_name = "als_build_ideas"
+    model_name = "als_test_model"
     model_version = str(int(datetime.now().timestamp()))
     model = RecommenderALS(
         model_name=model_name,

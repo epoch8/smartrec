@@ -99,7 +99,7 @@ class RecommenderALS(RecommenderModel):
             )
             strategy = "model_hot_users"
         else:
-            logger.info("User is new, ")
+            logger.info("New user")
             recos: pd.DataFrame = self.model_cold_users.recommend(
                 users=[user_ids],
                 dataset=self.dataset,
