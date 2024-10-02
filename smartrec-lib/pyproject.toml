@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "smartrec"
+name = "smartrec_lib"
 version = "0.1.0"
 description = ""
 authors = ["Shakirov Renat <renat@epoch8.co>"]
@@ -7,15 +7,13 @@ readme = "README.md"
 
 
 [tool.poetry.dependencies]
-python = ">=3.9,<=3.12"
+python = ">=3.10,<3.13"
 setuptools = { version = ">=74.1.2"}
 wheel = { version = ">=0.40.0" }
 fsspec = ">=2021.4.0"
 pydantic = ">=1.9.2"
 rectools = ">=0.6.0,<=0.8.0"
 implicit = "^0.7.2"
-lightfm = {version = "1.17"}
-tritonclient = {extras = ["all"], version = ">=2.43.0,<=2.49.0"}
 pydantic-settings = "^2.5.2"
 dill = "^0.3.8"
 pathy = "^0.11.0"

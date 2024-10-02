@@ -7,8 +7,8 @@ from pydantic import BaseModel
 from rectools import Columns
 from rectools.dataset import Dataset
 
-from smartrec.smartrec_lib.model import ALSSettings
-from smartrec.smartrec_lib.recommenders import RecommenderALS
+from smartrec_lib.model import ALSSettings
+from smartrec_lib.recommenders import RecommenderALS
 
 recsys_config_als = ALSSettings(
     ALS_ITERATIONS=10,
@@ -46,12 +46,12 @@ def test_fit_als():
     model.train(train_dataset)
     
     predictions = model.recommend(
-        user_ids=1,
-        top_n=3,
+        user_ids=0,
+        top_n=5,
         filter_viewed=True,
     )
-    print(predictions)
+    
     assert df_interactions.shape[0] == 100
-    assert predictions.item_ids == ['589', '1253', '3578']
-    assert predictions.scores == [0.0011700484901666641, 0.0011568143963813782, 0.0011557340621948242]
-    assert predictions.strategy == 'model_hot_users'
+    assert predictions.item_ids == ['3105', '1193', '3468', '434', '1217']
+    assert predictions.scores == [2.0, 1.0, 1.0, 1.0, 1.0]
+    assert predictions.strategy == 'model_cold_users'

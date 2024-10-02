@@ -1,7 +1,7 @@
 import setuptools
 
 setuptools.setup(
-    name="smartrec",
+    name="smartrec_client",
     version="0.0.1",
     include_package_data=True,
     packages=setuptools.find_packages(),
