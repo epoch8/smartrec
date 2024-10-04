@@ -7,7 +7,6 @@ import triton_python_backend_utils as pb_utils
 
 from smartrec_lib.recommenders import (
     RecommenderALS,
-    RecommenderLightFM,
     RecommenderPopular,
     RecommenderRandom,
 )
@@ -60,8 +59,8 @@ class TritonPythonModel:
         # TODO переделать
         if "als" in self.model_config["name"]:
             self.model = RecommenderALS.load_model(load_dir=script_path)
-        if "lightfm" in self.model_config["name"]:
-            self.model = RecommenderLightFM.load_model(load_dir=script_path)
+        # if "lightfm" in self.model_config["name"]:
+        #     self.model = RecommenderLightFM.load_model(load_dir=script_path)
         if "popular" in self.model_config["name"]:
             self.model = RecommenderPopular.load_model(load_dir=script_path)
         if "random" in self.model_config["name"]:
