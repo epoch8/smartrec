@@ -44,7 +44,8 @@ class RecommenderALS(RecommenderModel):
         self.recsys_config = recsys_config
 
         # base and feature models
-        self.model: ImplicitALSWrapperModel = None
+        self.model_hot_users: ImplicitALSWrapperModel = None
+        self.model_cold_users: PopularModel = None
         self.dataset: Dataset = None  # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
