@@ -74,7 +74,19 @@ class RecommenderALS(RecommenderModel):
             period=self.recsys_config.POPULARITY_PERIOD,
         )
         self.model_cold_users.fit(dataset)
-
+        
+        self.user_ids_hot = set(
+            self.dataset.user_id_map.convert_to_external(
+                self.dataset.interactions.df.user_id
+            )
+        )
+        # Some item_ids may not be in interactions
+        self.item_ids_hot = set(
+            self.dataset.item_id_map.convert_to_external(
+                self.dataset.interactions.df.item_id
+            )
+        )
+        
         logger.info("Base models trained.")
 
     def recommend(
@@ -85,17 +97,29 @@ class RecommenderALS(RecommenderModel):
         items_to_recommend: Optional[List[str]] = None,
     ) -> RecomItems:  # Return type is a RecomItems
         logger.info(f"Predicting for user {user_ids}")
+        # sorting items that we have in interactions
+        items_to_recommend_filtered = [
+            item_to_recommend
+            for item_to_recommend in items_to_recommend
+            if item_to_recommend in self.item_ids_hot
+        ]
+        if items_to_recommend_filtered == []:
+            return RecomItems(
+                item_ids=[],
+                scores=[],
+                strategy='no_strategy_items_to_recommend_filtered_is_empty',
+            )
         # user can be in the short memory, long memory or nowhere
-        if user_ids in self.user_id_map.external_ids:
+        if user_ids in self.user_id_map.external_ids and user_ids in self.user_ids_hot:
             recos: pd.DataFrame = self.model_hot_users.recommend(
                 users=[user_ids],
                 dataset=self.dataset,
                 k=top_n,
                 filter_viewed=filter_viewed,
                 items_to_recommend=(
-                    items_to_recommend
-                    if items_to_recommend is None
-                    else list(items_to_recommend)
+                    items_to_recommend_filtered
+                    if items_to_recommend_filtered is None
+                    else list(items_to_recommend_filtered)
                 ),
             )
             strategy = "model_hot_users"
@@ -107,9 +131,9 @@ class RecommenderALS(RecommenderModel):
                 k=top_n,
                 filter_viewed=filter_viewed,
                 items_to_recommend=(
-                    items_to_recommend
-                    if items_to_recommend is None
-                    else list(items_to_recommend)
+                    items_to_recommend_filtered
+                    if items_to_recommend_filtered is None
+                    else list(items_to_recommend_filtered)
                 ),
             )
             strategy = "model_cold_users"
