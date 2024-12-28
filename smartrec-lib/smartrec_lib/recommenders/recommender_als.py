@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from implicit.als import AlternatingLeastSquares
@@ -39,8 +39,8 @@ class RecommenderALS(RecommenderModel):
     ) -> None:
         super().__init__()
 
-        self.model_version = model_version
-        self.model_name = model_name
+        self.model_version = model_version or "-"
+        self.model_name = model_name or "-"
         self.recsys_config = recsys_config
 
         # base and feature models
@@ -51,6 +51,8 @@ class RecommenderALS(RecommenderModel):
         self.user_id_map: IdMap = None
 
     def train(self, dataset: Dataset):
+        assert self.recsys_config is not None
+
         self.dataset = dataset
 
         logger.info("Fitting model...")
@@ -74,7 +76,7 @@ class RecommenderALS(RecommenderModel):
             period=self.recsys_config.POPULARITY_PERIOD,
         )
         self.model_cold_users.fit(dataset)
-        
+
         self.user_ids_hot = set(
             self.dataset.user_id_map.convert_to_external(
                 self.dataset.interactions.df.user_id
@@ -86,16 +88,23 @@ class RecommenderALS(RecommenderModel):
                 self.dataset.interactions.df.item_id
             )
         )
-        
+
         logger.info("Base models trained.")
 
     def recommend(
         self,
-        user_ids: str,
+        user_ids: int,
         top_n: int = 20,
         filter_viewed: bool = True,
-        items_to_recommend: Optional[List[str]] = None,
+        items_to_recommend: Optional[List[int]] = None,
     ) -> RecomItems:  # Return type is a RecomItems
+        if items_to_recommend is None:
+            return RecomItems(
+                item_ids=[],
+                scores=[],
+                strategy="no_strategy_items_to_recommend_filtered_is_empty",
+            )
+
         logger.info(f"Predicting for user {user_ids}")
         # sorting items that we have in interactions
         items_to_recommend_filtered = [
@@ -103,15 +112,19 @@ class RecommenderALS(RecommenderModel):
             for item_to_recommend in items_to_recommend
             if item_to_recommend in self.item_ids_hot
         ]
-        if items_to_recommend_filtered == []:
+
+        if len(items_to_recommend_filtered) == 0:
             return RecomItems(
                 item_ids=[],
                 scores=[],
-                strategy='no_strategy_items_to_recommend_filtered_is_empty',
+                strategy="no_strategy_items_to_recommend_filtered_is_empty",
             )
+
+        recos: pd.DataFrame
+
         # user can be in the short memory, long memory or nowhere
         if user_ids in self.user_id_map.external_ids and user_ids in self.user_ids_hot:
-            recos: pd.DataFrame = self.model_hot_users.recommend(
+            recos = self.model_hot_users.recommend(
                 users=[user_ids],
                 dataset=self.dataset,
                 k=top_n,
@@ -125,7 +138,7 @@ class RecommenderALS(RecommenderModel):
             strategy = "model_hot_users"
         else:
             logger.info("New user")
-            recos: pd.DataFrame = self.model_cold_users.recommend(
+            recos = self.model_cold_users.recommend(
                 users=[user_ids],
                 dataset=self.dataset,
                 k=top_n,
@@ -178,7 +191,9 @@ class RecommenderALS(RecommenderModel):
 
         return None
 
-    def calc_metrics(self, k: int, dataset: Dataset):
+    def calc_metrics(self, k: int, dataset: Dataset) -> Dict[str, Any]:
+        assert self.recsys_config is not None
+
         metrics = {
             f"serendipity@{k}": Serendipity(k=k),
             f"map@{k}": MAP(k=k),

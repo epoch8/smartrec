@@ -1,14 +1,15 @@
 [tool.poetry]
-name = "smartrec_lib"
+name = "epoch8-smartrec-lib"
 version = "0.1.0"
 description = ""
 authors = ["Shakirov Renat <renat@epoch8.co>"]
 readme = "README.md"
 
+packages = [{ include = "smartrec_lib", from = "." }]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.13"
-setuptools = { version = ">=74.1.2"}
+python = ">=3.10,<3.12"               # Implicit is not yet compiled for 3.12
+setuptools = { version = ">=74.1.2" }
 wheel = { version = ">=0.40.0" }
 fsspec = ">=2021.4.0"
 pydantic = ">=1.9.2"
@@ -23,10 +24,15 @@ pytest = "*"
 flake8 = "*"
 isort = "*"
 black = "*"
+mypy = "*"
 
 
 [tool.isort]
 profile = "black"
+
+[tool.black]
+line-length = 120
+target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
 
 [build-system]
 requires = ["poetry-core"]

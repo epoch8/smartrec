@@ -22,7 +22,7 @@ recsys_config_als = ALSSettings(
 test_data = Path(__file__).parent
 
 
-def test_fit_als():
+def test_fit_als() -> None:
     df_interactions = pd.read_csv(
         test_data / "interactions.csv",
         header=0,
@@ -48,6 +48,7 @@ def test_fit_als():
         user_ids=0,
         top_n=5,
         filter_viewed=True,
+        items_to_recommend=[3105, 1193, 3468, 434, 1217],
     )
 
     assert df_interactions.shape[0] == 100

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import dill
 from pathy import Pathy
+from rectools.dataset import Dataset
 
 from smartrec_lib.model import RecomItems
 from smartrec_lib.save_and_load_triton_models import load_model_s3
@@ -25,16 +26,16 @@ class RecommenderModel:
         raise NotImplementedError()
 
     @abstractmethod
-    def calc_metrics(self) -> Dict[str, Any]:
+    def calc_metrics(self, k: int, dataset: Dataset) -> Dict[str, Any]:
         raise NotImplementedError()
 
     @abstractmethod
     def recommend(
         self,
-        user_ids: str,
+        user_ids: int,
         top_n: int,
         filter_viewed: bool,
-        items_to_recommend: Optional[List[str]],
+        items_to_recommend: Optional[List[int]] = None,  # TODO change to List[str]
     ) -> RecomItems:
         raise NotImplementedError()
 

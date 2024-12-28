@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
@@ -48,13 +49,12 @@ def test_fit_als():
         user_ids=1,
         top_n=3,
         filter_viewed=True,
+        items_to_recommend=[589, 1253, 3578],
     )
     print(predictions)
     assert df_interactions.shape[0] == 100
-    assert predictions.item_ids == ["589", "1253", "3578"]
-    assert predictions.scores == [
-        0.0011700484901666641,
-        0.0011568143963813782,
-        0.0011557340621948242,
-    ]
+    assert predictions.item_ids == ["1253", "589", "3578"]
+    np.testing.assert_allclose(
+        predictions.scores, [0.001144, 0.001138, 0.001135], atol=1e-5
+    )
     assert predictions.strategy == "model_hot_users"

@@ -1,6 +1,6 @@
-import io
 import logging
 from pathlib import Path
+from typing import Any
 
 import dill
 import fsspec
@@ -13,7 +13,10 @@ logger = logging.getLogger("ALS Model saving stage:")
 
 
 def upload_model_files(
-    base_s3_url: Pathy, model_version: str, model_name: str, model_data: io.BytesIO
+    base_s3_url: Pathy,
+    model_version: str,
+    model_name: str,
+    model_data: Any,
 ) -> None:
     """
     Upload a new version of a model to the given base S3 URL.
