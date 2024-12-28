@@ -6,8 +6,11 @@ authors = [{ name = "Shakirov Renat", email = "renat@epoch8.co" }]
 readme = "README.md"
 
 requires-python = ">=3.10, <4"
+
 dependencies = ["tritonclient[all]>=2.43.0,<=2.49.0"]
 
+[tool.hatch.build.targets.wheel]
+packages = ["smartrec_client"]
 
 [tool.uv]
 dev-dependencies = ["pytest"]
