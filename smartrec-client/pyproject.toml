@@ -16,6 +16,7 @@ pytest = "*"
 flake8 = "*"
 isort = "*"
 black = "*"
+mypy = "^1.14.0"
 
 
 [tool.isort]
