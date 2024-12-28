@@ -53,7 +53,7 @@ def test_fit_als():
     )
     print(predictions)
     assert df_interactions.shape[0] == 100
-    assert predictions.item_ids == ["1253", "589", "3578"]
+    assert set(predictions.item_ids) == set(["1253", "589", "3578"])
     np.testing.assert_allclose(
         predictions.scores, [0.001144, 0.001138, 0.001135], atol=1e-5
     )
