@@ -1,39 +1,36 @@
-[tool.poetry]
+[project]
 name = "epoch8-smartrec-lib"
-version = "0.1.0"
-description = ""
-authors = ["Shakirov Renat <renat@epoch8.co>"]
+version = "0.1.0-dev.1"
+description = "Add your description here"
 readme = "README.md"
-
-packages = [{ include = "smartrec_lib", from = "." }]
-
-[tool.poetry.dependencies]
-python = ">=3.10,<3.12"               # Implicit is not yet compiled for 3.12
-setuptools = { version = ">=74.1.2" }
-wheel = { version = ">=0.40.0" }
-fsspec = ">=2021.4.0"
-pydantic = ">=1.9.2"
-rectools = ">=0.6.0,<=0.8.0"
-implicit = "^0.7.2"
-pydantic-settings = "^2.5.2"
-dill = "^0.3.8"
-pathy = "^0.11.0"
-
-[tool.poetry.group.dev.dependencies]
-pytest = "*"
-flake8 = "*"
-isort = "*"
-black = "*"
-mypy = "*"
+authors = [{ name = "Shakirov Renat", email = "renat@epoch8.co" }]
 
 
-[tool.isort]
-profile = "black"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "dill>=0.3.8",
+    "fsspec>=2021.4.0",
+    "implicit>=0.7.2,<1.0.0",
+    "pathy>=0.11.0",
+    "pydantic>=1.9.2",
+    "pydantic-settings>=2.5.2",
+    "rectools>=0.6.0,<=0.8.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["smartrec_lib"]
+
+[dependency-groups]
+dev = ["pytest>=8.3.4"]
 
 [tool.black]
 line-length = 120
 target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
 
+[tool.isort]
+profile = "black"
+
+
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"

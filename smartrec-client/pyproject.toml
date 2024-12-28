@@ -1,26 +1,19 @@
-[tool.poetry]
+[project]
 name = "epoch8-smartrec-client"
 version = "0.1.0-dev.1"
 description = ""
-authors = ["Shakirov Renat <renat@epoch8.co>"]
+authors = [{ name = "Shakirov Renat", email = "renat@epoch8.co" }]
 readme = "README.md"
-packages = [
-    { include = "smartrec_client", from = "." }
-]
 
+requires-python = ">=3.10, <4"
 
-[tool.poetry.dependencies]
-python = ">=3.10,<4"
-setuptools = { version = ">=74.1.2"}
-tritonclient = {extras = ["all"], version = ">=2.43.0,<=2.49.0"}
+dependencies = ["tritonclient[all]>=2.43.0,<=2.49.0"]
 
-[tool.poetry.group.dev.dependencies]
-pytest = "*"
-flake8 = "*"
-isort = "*"
-black = "*"
-mypy = "^1.14.0"
+[tool.hatch.build.targets.wheel]
+packages = ["smartrec_client"]
 
+[tool.uv]
+dev-dependencies = ["pytest"]
 
 [tool.isort]
 profile = "black"
@@ -30,5 +23,5 @@ line-length = 120
 target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"

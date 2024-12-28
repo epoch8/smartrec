@@ -1,0 +1,15 @@
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "smartrec-lib",
+    "smartrec-client", 
+]
+
+[dependency-groups]
+dev = [
+    "flake8>=7.1.1",
+    "isort>=5.13.2",
+    "mypy>=1.14.0",
+]
