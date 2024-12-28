@@ -1,12 +1,13 @@
 [project]
-name = "smartrec-client"
-version = "0.1.0"
-description = "Add your description here"
+name = "epoch8-smartrec-client"
+version = "0.1.0-dev.1"
+description = ""
+authors = [{ name = "Shakirov Renat", email = "renat@epoch8.co" }]
 readme = "README.md"
+
 requires-python = ">=3.10, <4"
 dependencies = ["tritonclient[all]>=2.43.0,<=2.49.0"]
 
-authors = [{ name = "Shakirov Renat", email = "renat@epoch8.co" }]
 
 [tool.uv]
 dev-dependencies = ["pytest"]

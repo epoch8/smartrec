@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings
 class RecomItems(BaseModel):
     item_ids: List[str]
     scores: List[float]
-    strategy: str = None
+    strategy: Optional[str] = None
 
 
 class CommonRecommenderSettings(BaseSettings):
