@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from pathy import Pathy
@@ -38,8 +38,8 @@ class RecommenderRandom(RecommenderModel):
     ) -> None:
         super().__init__()
 
-        self.model_version = model_version
-        self.model_name = model_name
+        self.model_version = model_version or "-"
+        self.model_name = model_name or "-"
         self.recsys_config = recsys_config
 
         # base and feature models
@@ -50,6 +50,8 @@ class RecommenderRandom(RecommenderModel):
         self.strategy = "model_hot_and_cold_users"
 
     def train(self, dataset: Dataset):
+        assert self.recsys_config is not None
+
         self.dataset = dataset
 
         logger.info("Fitting model...")
@@ -65,10 +67,10 @@ class RecommenderRandom(RecommenderModel):
 
     def recommend(
         self,
-        user_ids: str,
+        user_ids: int,
         top_n: int = 20,
         filter_viewed: bool = True,
-        items_to_recommend: Optional[List[str]] = None,
+        items_to_recommend: Optional[List[int]] = None,
     ) -> RecomItems:  # Return type is a RecomItems
         logger.info(f"Predicting for user {user_ids}")
         # user can be in the short memory, long memory or nowhere
@@ -124,7 +126,9 @@ class RecommenderRandom(RecommenderModel):
 
         return None
 
-    def calc_metrics(self, k: int, dataset: Dataset):
+    def calc_metrics(self, k: int, dataset: Dataset) -> Dict[str, Any]:
+        assert self.recsys_config is not None
+
         metrics = {
             f"serendipity@{k}": Serendipity(k=k),
             f"map@{k}": MAP(k=k),

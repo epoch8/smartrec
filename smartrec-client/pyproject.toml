@@ -1,9 +1,12 @@
 [tool.poetry]
-name = "smartrec_client"
-version = "0.1.0"
+name = "epoch8-smartrec-client"
+version = "0.1.0-dev.1"
 description = ""
 authors = ["Shakirov Renat <renat@epoch8.co>"]
 readme = "README.md"
+packages = [
+    { include = "smartrec_client", from = "." }
+]
 
 
 [tool.poetry.dependencies]
@@ -16,10 +19,15 @@ pytest = "*"
 flake8 = "*"
 isort = "*"
 black = "*"
+mypy = "^1.14.0"
 
 
 [tool.isort]
 profile = "black"
+
+[tool.black]
+line-length = 120
+target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
 
 [build-system]
 requires = ["poetry-core"]
