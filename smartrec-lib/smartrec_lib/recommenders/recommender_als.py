@@ -206,7 +206,9 @@ class RecommenderALS(RecommenderModel):
             self.item_id_map.convert_to_internal([item]) for item in history if item in self.item_id_map.external_ids
         ]
 
-        print(f"{history_enc_list=}")
+        print(f"{history=}")
+
+        print(f"{self.item_id_map.external_ids=}")
 
         history_enc = np.array(history_enc_list)
         history_dense_v = np.zeros((1, self.model_hot_users.model.item_factors.shape[0]))
