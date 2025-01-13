@@ -17,7 +17,7 @@ from rectools.metrics import (
 from rectools.model_selection import TimeRangeSplitter, cross_validate
 from rectools.models import LightFMWrapperModel
 
-from smartrec_lib.model import LighFMSettings, RecomItems
+from smartrec_lib.model import LighFMSettings, RecomItems, Strategy
 from smartrec_lib.recommenders import RecommenderModel
 from smartrec_lib.save_and_load_triton_models import (
     clean_old_model_versions,
@@ -48,7 +48,7 @@ class RecommenderLightFM(RecommenderModel):
         self.dataset: Dataset = None  # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
-        self.strategy = "model_hot_and_cold_users"
+        self.strategy = Strategy.MODEL_HOT_AND_COLD_USERS
 
     def train(self, dataset: Dataset):
         assert self.recsys_config is not None
@@ -77,6 +77,7 @@ class RecommenderLightFM(RecommenderModel):
         top_n: int = 20,
         filter_viewed: bool = True,
         items_to_recommend: Optional[List[int]] = None,
+        history: Optional[List[int]] = None,
     ) -> RecomItems:  # Return type is a RecomItems
         logger.info(f"Predicting for user {user_ids}")
         # user can be in the short memory, long memory or nowhere
@@ -85,11 +86,7 @@ class RecommenderLightFM(RecommenderModel):
             dataset=self.dataset,
             k=top_n,
             filter_viewed=filter_viewed,
-            items_to_recommend=(
-                items_to_recommend
-                if items_to_recommend is None
-                else list(items_to_recommend)
-            ),
+            items_to_recommend=(items_to_recommend if items_to_recommend is None else list(items_to_recommend)),
         )
 
         recos = recos.sort_values(["user_id", "score"], ascending=False).reset_index(
@@ -125,9 +122,7 @@ class RecommenderLightFM(RecommenderModel):
             model_data=self.__dict__,
         )
         logger.info("Model saved successfully!")
-        clean_old_model_versions(
-            base_s3_url=base_s3_url, model_name=self.model_name, num_to_keep=num_to_keep
-        )
+        clean_old_model_versions(base_s3_url=base_s3_url, model_name=self.model_name, num_to_keep=num_to_keep)
         logger.info("Old models deleted!")
 
         return None

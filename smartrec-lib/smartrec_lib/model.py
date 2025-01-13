@@ -1,4 +1,5 @@
 from datetime import timedelta
+from enum import Enum
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel
@@ -21,9 +22,7 @@ class ALSSettings(CommonRecommenderSettings):
     ALS_REGULARIZATION_FACTOR: float
     ALS_FACTORS: int  # latent embeddings size
     ALS_ALPHA: int  # confidence multiplier for non-zero entries in interactions
-    POPULARITY_STRATEGY: Literal[
-        "n_users", "n_interactions", "mean_weight", "sum_weight"
-    ] = "n_users"
+    POPULARITY_STRATEGY: Literal["n_users", "n_interactions", "mean_weight", "sum_weight"] = "n_users"
     POPULARITY_PERIOD: Optional[timedelta] = timedelta(days=7)
 
 
@@ -39,7 +38,13 @@ class RandomSettings(CommonRecommenderSettings):
 
 
 class PopularSettings(CommonRecommenderSettings):
-    POPULARITY_STRATEGY: Literal[
-        "n_users", "n_interactions", "mean_weight", "sum_weight"
-    ] = "n_users"
+    POPULARITY_STRATEGY: Literal["n_users", "n_interactions", "mean_weight", "sum_weight"] = "n_users"
     POPULARITY_PERIOD: Optional[timedelta] = timedelta(days=7)
+
+
+class Strategy(Enum):
+    MODEL_HOT_AND_COLD_USERS = "model_hot_and_cold_users"
+    MODEL_WARM_USERS = "model_warm_users"
+    MODEL_HOT_USERS = "model_hot_users"
+    MODEL_COLD_USERS = "model_cold_users"
+    NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY = "no_strategy_items_to_recommend_filtered_is_empty"

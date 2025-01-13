@@ -5,7 +5,7 @@ import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
 
-from smartrec_lib.model import PopularSettings
+from smartrec_lib.model import PopularSettings, Strategy
 from smartrec_lib.recommenders import RecommenderPopular
 
 recsys_config_popular = PopularSettings(
@@ -46,6 +46,6 @@ def test_fit_popular():
     )
     print(predictions)
     assert df_interactions.shape[0] == 100
-    assert predictions.item_ids == ['3468', '434', '1217']
+    assert predictions.item_ids == ["3468", "434", "1217"]
     assert predictions.scores == [1.0, 1.0, 1.0]
-    assert predictions.strategy == "model_hot_and_cold_users"
+    assert predictions.strategy == Strategy.MODEL_HOT_AND_COLD_USERS

@@ -46,13 +46,14 @@ def test_fit_als():
     model.train(train_dataset)
 
     predictions = model.recommend(
-        user_ids=1,
+        user_ids=23901319232,
         top_n=3,
-        filter_viewed=True,
-        items_to_recommend=[589, 1253, 3578],
+        filter_viewed=False,
+        items_to_recommend=[110, 589, 661, 914, 1188, 1193, 1253, 1259, 2398, 3030, 3108, 3408, 2804, 3256, 3578],
+        history=[595, 661, 1253, 2398, 3108, 3408, 2804, 3256, 3578],
     )
     print(predictions)
     assert df_interactions.shape[0] == 100
-    assert set(predictions.item_ids) == set(["1253", "589", "3578"])
-    np.testing.assert_allclose(predictions.scores, [0.001144, 0.001138, 0.001135], atol=1e-5)
-    assert predictions.strategy == Strategy.MODEL_HOT_USERS
+    assert set(predictions.item_ids) == set(["2398", "2804", "661"])
+    np.testing.assert_allclose(predictions.scores, [0.01239, 0.01238, 0.0], atol=1e-5)
+    assert predictions.strategy == Strategy.MODEL_WARM_USERS

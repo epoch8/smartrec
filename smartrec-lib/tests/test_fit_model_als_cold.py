@@ -5,7 +5,7 @@ import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
 
-from smartrec_lib.model import ALSSettings
+from smartrec_lib.model import ALSSettings, Strategy
 from smartrec_lib.recommenders import RecommenderALS
 
 recsys_config_als = ALSSettings(
@@ -54,4 +54,4 @@ def test_fit_als() -> None:
     assert df_interactions.shape[0] == 100
     assert predictions.item_ids == ["3105", "1193", "3468", "434", "1217"]
     assert predictions.scores == [2.0, 1.0, 1.0, 1.0, 1.0]
-    assert predictions.strategy == "model_cold_users"
+    assert predictions.strategy == Strategy.MODEL_COLD_USERS

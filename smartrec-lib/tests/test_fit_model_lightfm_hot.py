@@ -6,7 +6,7 @@ import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
 
-from smartrec_lib.model import LighFMSettings
+from smartrec_lib.model import LighFMSettings, Strategy
 from smartrec_lib.recommenders import RecommenderLightFM
 
 recsys_config_als = LighFMSettings(
@@ -51,4 +51,4 @@ def test_fit_als():
     np.testing.assert_allclose(
         predictions.scores, [-0.6149794459342957, -0.6518818736076355, -0.7153101563453674], atol=1e-5
     )
-    assert predictions.strategy == "model_hot_and_cold_users"
+    assert predictions.strategy == Strategy.MODEL_HOT_AND_COLD_USERS

@@ -36,6 +36,7 @@ class RecommenderModel:
         top_n: int,
         filter_viewed: bool,
         items_to_recommend: Optional[List[int]] = None,  # TODO change to List[str]
+        history: Optional[List[int]] = None,
     ) -> RecomItems:
         raise NotImplementedError()
 
