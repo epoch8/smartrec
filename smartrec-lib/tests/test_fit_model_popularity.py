@@ -44,7 +44,7 @@ def test_fit_popular():
         top_n=3,
         filter_viewed=True,
     )
-    print(predictions)
+    print(f"{predictions=}")
     assert df_interactions.shape[0] == 100
     assert predictions.item_ids == ["3468", "434", "1217"]
     assert predictions.scores == [1.0, 1.0, 1.0]
