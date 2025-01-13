@@ -51,4 +51,4 @@ def test_fit_als():
     np.testing.assert_allclose(
         predictions.scores, [-0.6149794459342957, -0.6518818736076355, -0.7153101563453674], atol=1e-5
     )
-    assert predictions.strategy == Strategy.MODEL_HOT_AND_COLD_USERS
+    assert predictions.strategy == Strategy.MODEL_HOT_AND_COLD_USERS.value
