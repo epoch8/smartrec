@@ -54,7 +54,6 @@ class RecommenderALS(RecommenderModel):
 
     @classmethod
     def compute_item_similarity(cls, model: ImplicitALSWrapperModel, k_max_values: int = 100) -> np.ndarray:
-        print(f"{dir(model)=}")
         if not isinstance(model.model.item_factors, np.ndarray):
             item_factors = model.model.item_factors.to_numpy()
         else:
@@ -123,6 +122,7 @@ class RecommenderALS(RecommenderModel):
         items_to_recommend_filtered = [
             item_to_recommend for item_to_recommend in items_to_recommend if item_to_recommend in self.item_ids_hot
         ]
+        print(f"{items_to_recommend_filtered=}")
 
         recos: pd.DataFrame
 
@@ -150,6 +150,7 @@ class RecommenderALS(RecommenderModel):
                 items_to_recommend=items_to_recommend,
                 history=history,
             )
+            print(f"{recos=}")
             strategy = Strategy.MODEL_WARM_USERS
         else:
             logger.info("Cold user")
@@ -198,6 +199,8 @@ class RecommenderALS(RecommenderModel):
             else:
                 return pd.DataFrame(columns=["user_id", "item_id", "score"])
 
+        print(f"{items_enc_v=}")
+
         # history processing
         history_enc_list = [
             self.item_id_map.convert_to_internal([item]) for item in history if item in self.item_id_map.external_ids
@@ -208,6 +211,8 @@ class RecommenderALS(RecommenderModel):
         history_dense_v[:, history_enc] = 1
         all_scores = self.item_similarity.T.dot(history_dense_v.T).T[0]
         sorted_item_ids = np.argsort(all_scores)
+
+        print(f"{sorted_item_ids=}")
 
         items_mask = np.ones(len(sorted_item_ids), dtype=bool)
 
@@ -222,6 +227,7 @@ class RecommenderALS(RecommenderModel):
         sorted_item_ids = sorted_item_ids[items_mask]
 
         nearest_item_ids_enc = sorted_item_ids[: -top_n - 1 : -1]
+        print(f"{nearest_item_ids_enc=}")
         nearest_scores = all_scores[nearest_item_ids_enc]
 
         result = pd.DataFrame(
