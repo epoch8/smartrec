@@ -80,6 +80,8 @@ class RecommenderALS(RecommenderModel):
 
         logger.info("Fitting model...")
 
+        np.random.seed(self.recsys_config.RECOMMENDER_RANDOM_STATE)
+
         self.model_hot_users = ImplicitALSWrapperModel(
             AlternatingLeastSquares(
                 factors=self.recsys_config.ALS_FACTORS,

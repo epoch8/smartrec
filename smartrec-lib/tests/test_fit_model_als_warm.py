@@ -23,6 +23,9 @@ recsys_config_als = ALSSettings(
 test_data = Path(__file__).parent
 
 
+np.random.seed(recsys_config_als.RECOMMENDER_RANDOM_STATE)
+
+
 def test_fit_als():
     df_interactions = pd.read_csv(
         test_data / "interactions.csv",
@@ -54,6 +57,6 @@ def test_fit_als():
     )
     print(f"{predictions=}")
     assert df_interactions.shape[0] == 100
-    assert set(predictions.item_ids) == set(["2398", "2804", "1253"])
+    assert set(predictions.item_ids) == set(["2398", "2804", "661"])
     np.testing.assert_allclose(predictions.scores, [0.01239, 0.01238, 0.0], atol=1e-5)
     assert predictions.strategy == Strategy.MODEL_WARM_USERS.value
