@@ -33,9 +33,12 @@ def test_fit_als():
         names=[Columns.User, Columns.Item, Columns.Weight, Columns.Datetime],
     )
 
+    print(f"1 - {df_interactions.head(20)=}")
+    print(f"1 - {df_interactions.tail(20)=}")
     train_dataset = Dataset.construct(
         interactions_df=df_interactions,
     )
+    print(f"1 - {train_dataset=}")
 
     model_name = "als_test_model"
     model_version = str(int(datetime.now().timestamp()))
