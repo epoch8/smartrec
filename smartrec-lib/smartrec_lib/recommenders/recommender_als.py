@@ -58,13 +58,18 @@ class RecommenderALS(RecommenderModel):
             item_factors = model.model.item_factors.to_numpy()
         else:
             item_factors = model.model.item_factors
+        print(f"2 - {item_factors=}")
         matrix = item_factors.dot(item_factors.T)
-
+        print(f"2 - {matrix=}")
         k_set_to_zero = matrix.shape[0] - k_max_values
+        print(f"2 - {k_set_to_zero=}")
         mask = np.apply_along_axis(lambda x: x < np.partition(x, k_set_to_zero)[k_set_to_zero], 1, matrix)
+        print(f"2 - {mask=}")
         matrix[mask] = 0
 
         sparse_matrix = sparse.csr_matrix(matrix)
+
+        print(f"2 - {sparse_matrix=}")
 
         return sparse_matrix
 
