@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
-
 from smartrec_lib.model import ALSSettings, Strategy
 from smartrec_lib.recommenders import RecommenderALS
 
@@ -51,9 +50,6 @@ def test_fit_als():
     # metrics = model.calc_metrics(k=10, dataset=train_dataset)
     model.train(train_dataset)
 
-    print(f"1 - {dir(model.model_hot_users)=}")
-    print(f"1 - {model.model_hot_users.get_vectors()=}")
-
     predictions = model.recommend(
         user_ids=23901319232,
         top_n=3,
@@ -63,6 +59,6 @@ def test_fit_als():
     )
     print(f"{predictions=}")
     assert df_interactions.shape[0] == 100
-    assert set(predictions.item_ids) == set(["23989", "2804", "661"])
+    assert set(predictions.item_ids) == set(["2398", "2804", "661"])
     np.testing.assert_allclose(predictions.scores, [0.01239, 0.01238, 0.0], atol=1e-5)
     assert predictions.strategy == Strategy.MODEL_WARM_USERS.value

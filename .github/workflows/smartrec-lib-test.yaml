@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/smartrec-lib-test.yaml"
       - "smartrec-lib/**"
+      - "uv.lock"
 
 jobs:
   build_and_test:
@@ -26,7 +27,11 @@ jobs:
         git lfs pull
     - name: Install the latest version of uv
       uses: astral-sh/setup-uv@v5
+    - name: Move uv.lock to smartrec-lib
+      run: |
+        cp uv.lock ./smartrec-lib/
     - name: Install libs
+      working-directory: ./smartrec-lib
       run: |
         uv sync
     - name: Lint with flake8
