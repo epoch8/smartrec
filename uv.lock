@@ -362,12 +362,11 @@ dev = [{ name = "pytest" }]
 
 [[package]]
 name = "epoch8-smartrec-lib"
-version = "0.1.0.dev2"
+version = "0.1.0.dev3"
 source = { editable = "smartrec-lib" }
 dependencies = [
     { name = "dill" },
     { name = "fsspec" },
-    { name = "implicit" },
     { name = "pathy" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -385,11 +384,10 @@ dev = [
 requires-dist = [
     { name = "dill", specifier = ">=0.3.8" },
     { name = "fsspec", specifier = ">=2021.4.0" },
-    { name = "implicit", specifier = ">=0.7.2,<1.0.0" },
     { name = "pathy", specifier = ">=0.11.0" },
     { name = "pydantic", specifier = ">=1.9.2" },
     { name = "pydantic-settings", specifier = ">=2.5.2" },
-    { name = "rectools", specifier = ">=0.6.0,<=0.8.0" },
+    { name = "rectools", specifier = ">=0.10.0,<=0.12.0" },
     { name = "rectools-lightfm", specifier = ">=1.17.3" },
 ]
 
@@ -1250,20 +1248,23 @@ wheels = [
 
 [[package]]
 name = "rectools"
-version = "0.8.0"
+version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "implicit" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
     { name = "scipy" },
     { name = "tqdm" },
     { name = "typeguard" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/35/52/10d9b08fd58bbeee7aae086c3eb543e5d6f2a049f509ff4b04a15c10466d/rectools-0.8.0.tar.gz", hash = "sha256:9b011ad58d2b54f06da5412eb494a97fa95102acf37ed32d127b274840241c59", size = 95642 }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/d0/d8f307199b47a23780b5e393fa4cad2c9884325ed2214dd6bee625a221ef/rectools-0.11.0.tar.gz", hash = "sha256:6218b85af0e776378eb73bcb0af157efbf99925594bec417a834221756dbc02b", size = 134315 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/e2/ace94e7e696fb31879e2c4df33e73057318edae94c4f2d74916b2982a47d/rectools-0.8.0-py3-none-any.whl", hash = "sha256:7745a8b8604b1c9864a2d6598ce817b078a68ad8979c8ebe08f5ff45a7c5dd36", size = 143036 },
+    { url = "https://files.pythonhosted.org/packages/bc/dc/ec793800e1622d520ab2ed8aaaa764e52bfeb26eeb5b00c240b953d02ee3/rectools-0.11.0-py3-none-any.whl", hash = "sha256:e348b7f199b858f6d62e1868712fd91c031b4c01fa478380f749651eac32b9d2", size = 200040 },
 ]
 
 [[package]]

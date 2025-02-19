@@ -1,6 +1,6 @@
 [project]
 name = "epoch8-smartrec-lib"
-version = "0.1.0-dev.2"
+version = "0.1.0-dev.3"
 description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Shakirov Renat", email = "renat@epoch8.co" }]
@@ -10,11 +10,10 @@ requires-python = ">=3.10,<3.13"
 dependencies = [
     "dill>=0.3.8",
     "fsspec>=2021.4.0",
-    "implicit>=0.7.2,<1.0.0",
     "pathy>=0.11.0",
     "pydantic>=1.9.2",
     "pydantic-settings>=2.5.2",
-    "rectools>=0.6.0,<=0.8.0",
+    "rectools>=0.10.0,<=0.12.0",
     "rectools-lightfm>=1.17.3",
 ]
 
