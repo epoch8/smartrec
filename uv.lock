@@ -383,9 +383,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dill", specifier = ">=0.3.8" },
-    { name = "fsspec", specifier = ">=2021.4.0" },
+    { name = "fsspec", specifier = ">=2023.4.0" },
     { name = "pathy", specifier = ">=0.11.0" },
-    { name = "pydantic", specifier = ">=1.9.2" },
+    { name = "pydantic", specifier = ">=2.8.0" },
     { name = "pydantic-settings", specifier = ">=2.5.2" },
     { name = "rectools", specifier = ">=0.10.0,<=0.12.0" },
     { name = "rectools-lightfm", specifier = ">=1.17.3" },
@@ -1248,7 +1248,7 @@ wheels = [
 
 [[package]]
 name = "rectools"
-version = "0.11.0"
+version = "0.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -1262,9 +1262,9 @@ dependencies = [
     { name = "typeguard" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/d0/d8f307199b47a23780b5e393fa4cad2c9884325ed2214dd6bee625a221ef/rectools-0.11.0.tar.gz", hash = "sha256:6218b85af0e776378eb73bcb0af157efbf99925594bec417a834221756dbc02b", size = 134315 }
+sdist = { url = "https://files.pythonhosted.org/packages/36/94/8ab08503ed6a0a2ae3b86269bcad9a13622da0dd0e52983c3f2f8c259eb7/rectools-0.10.0.tar.gz", hash = "sha256:7c26716f795fbaae72b737451263b5cbba31ea517e62b2c2daee791eec332d1a", size = 106878 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bc/dc/ec793800e1622d520ab2ed8aaaa764e52bfeb26eeb5b00c240b953d02ee3/rectools-0.11.0-py3-none-any.whl", hash = "sha256:e348b7f199b858f6d62e1868712fd91c031b4c01fa478380f749651eac32b9d2", size = 200040 },
+    { url = "https://files.pythonhosted.org/packages/7f/c4/65cc7c81343d81389b12b15f21cc48a89971631cb6329fb0aa60bbe1a823/rectools-0.10.0-py3-none-any.whl", hash = "sha256:1f0c22c54558b51a0982a0a8283cb046d8bc79a84fb0c732f9e803eea307c504", size = 159609 },
 ]
 
 [[package]]
