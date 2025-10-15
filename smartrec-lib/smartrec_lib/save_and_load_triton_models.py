@@ -104,9 +104,7 @@ def copy_model_py(src_folder: Pathy, dest_folder: Pathy) -> None:
     fs.copy(str(src_model_py_path), str(dest_model_py_path))
 
 
-def clean_old_model_versions(
-    base_s3_url: Pathy, model_name: str, num_to_keep: int
-) -> None:
+def clean_old_model_versions(base_s3_url: Pathy, model_name: str, num_to_keep: int) -> None:
     """
     Clean old model versions from the bucket, keeping only a specified number of recent versions.
 

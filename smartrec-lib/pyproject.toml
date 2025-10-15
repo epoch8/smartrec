@@ -1,7 +1,7 @@
 [project]
 name = "epoch8-smartrec-lib"
-version = "0.1.0-dev.1"
-description = "Add your description here"
+version = "0.1.1-dev.5"
+description = "smartrec main lib"
 readme = "README.md"
 authors = [{ name = "Shakirov Renat", email = "renat@epoch8.co" }]
 
@@ -9,23 +9,28 @@ authors = [{ name = "Shakirov Renat", email = "renat@epoch8.co" }]
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "dill>=0.3.8",
-    "fsspec>=2021.4.0",
-    "implicit>=0.7.2,<1.0.0",
+    "fsspec>=2023.4.0",
+    "numpy>=1.26.4",
     "pathy>=0.11.0",
-    "pydantic>=1.9.2",
+    "pydantic>=2.8.0",
     "pydantic-settings>=2.5.2",
-    "rectools>=0.6.0,<=0.8.0",
+    "rectools>=0.17.0,<=0.18.0",
+    "rectools-lightfm>=1.17.3",
+    "scipy>=1.12.0",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["smartrec_lib"]
 
 [dependency-groups]
-dev = ["pytest>=8.3.4"]
+dev = [
+    "black>=24.10.0",
+    "pytest>=8.3.4",
+]
 
 [tool.black]
 line-length = 120
-target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
+target-version = ['py39', 'py310']
 
 [tool.isort]
 profile = "black"
