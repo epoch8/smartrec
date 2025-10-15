@@ -25,6 +25,20 @@ class RecommenderModel:
     def train(cls, train) -> "RecommenderModel":
         raise NotImplementedError()
 
+    def train_partial(self, dataset: Dataset, **kwargs) -> None:
+        """
+        Perform partial (incremental) training on new data.
+        This method is optional and may not be implemented by all models.
+        
+        Parameters:
+            dataset: New dataset with additional interactions to train on.
+            **kwargs: Additional model-specific parameters (e.g., epochs for ALS).
+        """
+        raise NotImplementedError(
+            f"partial_fit is not implemented for {self.__class__.__name__}. "
+            "This method is only available for models that support incremental learning."
+        )
+
     @abstractmethod
     def calc_metrics(self, k: int, dataset: Dataset) -> Dict[str, Any]:
         raise NotImplementedError()

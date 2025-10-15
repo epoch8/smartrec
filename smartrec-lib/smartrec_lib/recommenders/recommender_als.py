@@ -54,22 +54,41 @@ class RecommenderALS(RecommenderModel):
 
     @classmethod
     def compute_item_similarity(cls, model: ImplicitALSWrapperModel, k_max_values: int = 100) -> np.ndarray:
+        """
+        Compute item similarity matrix and keep only top-k similar items for each item.
+        
+        Parameters:
+            model: Trained ImplicitALSWrapperModel
+            k_max_values: Maximum number of similar items to keep for each item
+            
+        Returns:
+            Sparse CSR matrix with item similarities
+        """
         if not isinstance(model.model.item_factors, np.ndarray):
             item_factors = model.model.item_factors.to_numpy()
         else:
             item_factors = model.model.item_factors
-        print(f"2 - {item_factors=}")
+        
+        # Compute similarity matrix
         matrix = item_factors.dot(item_factors.T)
-        print(f"2 - {matrix=}")
-        k_set_to_zero = matrix.shape[0] - k_max_values
-        print(f"2 - {k_set_to_zero=}")
-        mask = np.apply_along_axis(lambda x: x < np.partition(x, k_set_to_zero)[k_set_to_zero], 1, matrix)
-        print(f"2 - {mask=}")
+        
+        n_items = matrix.shape[0]
+        
+        # If we have fewer items than k_max_values, keep all similarities
+        if n_items <= k_max_values:
+            sparse_matrix = sparse.csr_matrix(matrix)
+            return sparse_matrix
+        
+        # Otherwise, keep only top k_max_values for each item
+        k_set_to_zero = n_items - k_max_values
+        mask = np.apply_along_axis(
+            lambda x: x < np.partition(x, k_set_to_zero)[k_set_to_zero], 
+            1, 
+            matrix
+        )
         matrix[mask] = 0
 
         sparse_matrix = sparse.csr_matrix(matrix)
-
-        print(f"2 - {sparse_matrix=}")
 
         return sparse_matrix
 
@@ -109,6 +128,61 @@ class RecommenderALS(RecommenderModel):
 
         logger.info("Base models trained.")
 
+    def train_partial(self, dataset: Dataset, epochs: Optional[int] = None) -> None:
+        """
+        Perform partial (incremental) training on new data.
+        Updates the existing model with new interactions without full retraining.
+        
+        Note: If new users or items are detected, the method will perform full retraining
+        instead of partial fit, as rectools' _fit_partial doesn't support adding new entities.
+
+        Parameters:
+            dataset: New dataset with additional interactions to train on.
+            epochs: Number of epochs for partial training. If None, uses ALS_ITERATIONS from config.
+        """
+        assert self.recsys_config is not None
+        assert self.model_hot_users is not None, "Model must be trained before train_partial. Call train() first."
+
+        logger.info("Performing partial fit...")
+
+        # Check if there are new users or items
+        new_users = set(dataset.user_id_map.external_ids) - set(self.user_id_map.external_ids)
+        new_items = set(dataset.item_id_map.external_ids) - set(self.item_id_map.external_ids)
+        
+        if new_users or new_items:
+            # If there are new users or items, we need to do full retraining
+            logger.warning(
+                f"Detected {len(new_users)} new users and {len(new_items)} new items. "
+                "Performing full retraining instead of partial fit."
+            )
+            # Full retraining
+            self.model_hot_users.fit(dataset)
+        else:
+            # Use config iterations if epochs not specified
+            if epochs is None:
+                epochs = self.recsys_config.ALS_ITERATIONS
+
+            # Partial fit for hot users model - only updates existing user/item factors
+            logger.info(f"No new users/items detected. Performing partial fit with {epochs} epochs.")
+            self.model_hot_users._fit_partial(dataset, epochs=epochs)
+        
+        # Update dataset and id maps
+        self.dataset = dataset
+        self.user_id_map = dataset.user_id_map
+        self.item_id_map = dataset.item_id_map
+
+        # Recompute item similarity matrix with updated factors
+        self.item_similarity = self.compute_item_similarity(self.model_hot_users)
+
+        # Refit cold users (popularity) model with full dataset
+        self.model_cold_users.fit(dataset)
+
+        # Update hot user and item sets
+        self.user_ids_hot = set(self.dataset.user_id_map.convert_to_external(self.dataset.interactions.df.user_id))
+        self.item_ids_hot = set(self.dataset.item_id_map.convert_to_external(self.dataset.interactions.df.item_id))
+
+        logger.info("Partial fit completed successfully.")
+
     def recommend(
         self,
         user_ids: int,
@@ -125,18 +199,21 @@ class RecommenderALS(RecommenderModel):
             )
 
         logger.info(f"Predicting for user {user_ids}")
-        # sorting items that we have in interactions
-        items_to_recommend_filtered = [
-            item_to_recommend for item_to_recommend in items_to_recommend if item_to_recommend in self.item_ids_hot
-        ]
-        print(f"{items_to_recommend_filtered=}")
-
-        recos: pd.DataFrame
+        
+        # Filter items_to_recommend to only those that exist in our training data
+        # If items_to_recommend is None, we don't filter and show all items
+        items_to_recommend_filtered = None
+        if items_to_recommend is not None:
+            items_to_recommend_filtered = [
+                item_to_recommend 
+                for item_to_recommend in items_to_recommend 
+                if item_to_recommend in self.item_ids_hot
+            ]
 
         # user can be in the short memory, long memory or nowhere
         if user_ids in self.user_id_map.external_ids and user_ids in self.user_ids_hot:
             logger.info("Hot user")
-            recos = self.model_hot_users.recommend(
+            recos_df = self.model_hot_users.recommend(
                 users=[user_ids],
                 dataset=self.dataset,
                 k=top_n,
@@ -147,21 +224,27 @@ class RecommenderALS(RecommenderModel):
                     else list(items_to_recommend_filtered)
                 ),
             )
-            strategy = Strategy.MODEL_HOT_USERS
+            recos_df = recos_df.sort_values(["user_id", "score"], ascending=False).reset_index(drop=True)
+            
+            return RecomItems(
+                item_ids=recos_df.item_id.astype(str).tolist(),
+                scores=recos_df.score.tolist(),
+                strategy=Strategy.MODEL_HOT_USERS,
+            )
+            
         elif history and len(history):
             logger.info("Warm user")
-            recos = self.recommend_unknown_user_with_history(
+            return self.recommend_unknown_user_with_history(
                 user_ids=user_ids,
                 top_n=top_n,
                 filter_viewed=filter_viewed,
                 items_to_recommend=items_to_recommend,
                 history=history,
             )
-            print(f"{recos=}")
-            strategy = Strategy.MODEL_WARM_USERS
+            
         else:
             logger.info("Cold user")
-            recos = self.model_cold_users.recommend(
+            recos_df = self.model_cold_users.recommend(
                 users=[user_ids],
                 dataset=self.dataset,
                 k=top_n,
@@ -172,17 +255,13 @@ class RecommenderALS(RecommenderModel):
                     else list(items_to_recommend_filtered)
                 ),
             )
-            strategy = Strategy.MODEL_COLD_USERS
-
-        recos = recos.sort_values(["user_id", "score"], ascending=False).reset_index(
-            drop=True
-        )  # Assuming 'user_id' is the column name
-
-        return RecomItems(
-            item_ids=recos.item_id.astype(str).tolist(),
-            scores=recos.score.tolist(),
-            strategy=strategy,
-        )
+            recos_df = recos_df.sort_values(["user_id", "score"], ascending=False).reset_index(drop=True)
+            
+            return RecomItems(
+                item_ids=recos_df.item_id.astype(str).tolist(),
+                scores=recos_df.score.tolist(),
+                strategy=Strategy.MODEL_COLD_USERS,
+            )
 
     def recommend_unknown_user_with_history(
         self,
@@ -192,7 +271,22 @@ class RecommenderALS(RecommenderModel):
         filter_viewed: bool = True,
         items_to_recommend: Optional[List[int]] = None,
     ) -> RecomItems:
-        # items_to_recommend processing
+        """
+        Recommend items for warm users (users with history but not in training data).
+        Uses item-to-item similarity based on user's history.
+        
+        Parameters:
+            user_ids: User ID to generate recommendations for
+            history: List of item IDs that user has interacted with
+            top_n: Number of recommendations to return
+            filter_viewed: Whether to filter out items from history
+            items_to_recommend: Optional list of item IDs to restrict recommendations to
+            
+        Returns:
+            RecomItems object with item_ids, scores, and strategy
+        """
+        # Process items_to_recommend - create a mask for filtering
+        items_enc_v = None
         if items_to_recommend is not None:
             items_to_recommend_enc = [
                 self.item_id_map.convert_to_internal([item])
@@ -204,54 +298,63 @@ class RecommenderALS(RecommenderModel):
                 items_enc_v = np.zeros((1, self.model_hot_users.model.item_factors.shape[0]))
                 items_enc_v[:, items_enc] = 1
             else:
-                return pd.DataFrame(columns=["user_id", "item_id", "score"])
+                # No valid items to recommend
+                return RecomItems(
+                    item_ids=[],
+                    scores=[],
+                    strategy=Strategy.NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY,
+                )
 
-        print(f"{items_enc_v=}")
-
-        # history processing
+        # Process history - convert to internal IDs and create dense vector
         history_enc_list = [
-            self.item_id_map.convert_to_internal([item]) for item in history if item in self.item_id_map.external_ids
+            self.item_id_map.convert_to_internal([item]) 
+            for item in history 
+            if item in self.item_id_map.external_ids
         ]
-
-        print(f"{history=}")
-
-        print(f"{self.item_id_map.external_ids=}")
+        
+        if len(history_enc_list) == 0:
+            # No valid history items
+            return RecomItems(
+                item_ids=[],
+                scores=[],
+                strategy=Strategy.MODEL_WARM_USERS,
+            )
 
         history_enc = np.array(history_enc_list)
         history_dense_v = np.zeros((1, self.model_hot_users.model.item_factors.shape[0]))
         history_dense_v[:, history_enc] = 1
-        print(f"{history_dense_v=}")
+        
+        # Compute similarity scores between history items and all items
         all_scores = self.item_similarity.T.dot(history_dense_v.T).T[0]
-        print(f"{all_scores=}")
         sorted_item_ids = np.argsort(all_scores)
 
-        print(f"{sorted_item_ids=}")
-
+        # Create mask for filtering
         items_mask = np.ones(len(sorted_item_ids), dtype=bool)
 
+        # Filter out already viewed items if requested
         if filter_viewed:
             filter_already_liked_mask = ~(history_dense_v[:, sorted_item_ids][0].astype(bool))
             items_mask = items_mask & filter_already_liked_mask
 
-        if items_to_recommend:
+        # Filter to only requested items if provided
+        if items_to_recommend is not None and items_enc_v is not None:
             filter_item_mask = items_enc_v[:, sorted_item_ids][0].astype(bool)
             items_mask = items_mask & filter_item_mask
 
         sorted_item_ids = sorted_item_ids[items_mask]
 
+        # Get top-N items (reverse order to get highest scores)
         nearest_item_ids_enc = sorted_item_ids[: -top_n - 1 : -1]
-        print(f"{nearest_item_ids_enc=}")
         nearest_scores = all_scores[nearest_item_ids_enc]
 
-        result = pd.DataFrame(
-            {
-                "user_id": [user_ids] * len(nearest_item_ids_enc),
-                "item_id": self.item_id_map.convert_to_external(nearest_item_ids_enc),
-                "score": nearest_scores,
-            }
+        # Convert to external IDs and return
+        item_ids_external = self.item_id_map.convert_to_external(nearest_item_ids_enc)
+        
+        return RecomItems(
+            item_ids=[str(item_id) for item_id in item_ids_external],
+            scores=nearest_scores.tolist(),
+            strategy=Strategy.MODEL_WARM_USERS,
         )
-
-        return result
 
     def save_model_triton(self, base_s3_url: Pathy, num_to_keep: int) -> None:
         """

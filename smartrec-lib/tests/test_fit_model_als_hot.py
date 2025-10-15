@@ -54,5 +54,5 @@ def test_fit_als():
     print(f"{predictions=}")
     assert df_interactions.shape[0] == 100
     assert set(predictions.item_ids) == set(["1253", "589", "3578"])
-    np.testing.assert_allclose(predictions.scores, [0.001144, 0.001138, 0.001135], atol=1e-5)
+    np.testing.assert_allclose(predictions.scores, [0.001121, 0.001117, 0.001114], atol=1e-5)
     assert predictions.strategy == Strategy.MODEL_HOT_USERS.value
