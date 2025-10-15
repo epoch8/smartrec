@@ -1,11 +1,9 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
-
 from smartrec_lib.model import ALSSettings, Strategy
 from smartrec_lib.recommenders import RecommenderALS
 
@@ -30,9 +28,12 @@ def test_fit_als():
         names=[Columns.User, Columns.Item, Columns.Weight, Columns.Datetime],
     )
 
+    print(f"1 - {df_interactions.head(20)=}")
+    print(f"1 - {df_interactions.tail(20)=}")
     train_dataset = Dataset.construct(
         interactions_df=df_interactions,
     )
+    print(f"1 - {train_dataset=}")
 
     model_name = "als_test_model"
     model_version = str(int(datetime.now().timestamp()))
@@ -46,20 +47,31 @@ def test_fit_als():
     model.train(train_dataset)
 
     predictions = model.recommend(
-        user_ids=1,
+        user_ids=23901319232,
         top_n=3,
-        filter_viewed=True,
-        items_to_recommend=[589, 1253, 3578],
+        filter_viewed=False,
+        items_to_recommend=[110, 589, 661, 914, 1188, 1193, 1253, 1259, 2398, 3030, 3108, 3408, 2804, 3256, 3578],
+        history=[595, 661, 1253, 2398, 3108, 3408, 2804, 3256, 3578],
     )
     print(f"{predictions=}")
     
     # Basic assertions
     assert df_interactions.shape[0] == 100
     assert len(predictions.item_ids) == 3
-    assert set(predictions.item_ids) == set(["1253", "589", "3578"])
-    assert predictions.strategy == Strategy.MODEL_HOT_USERS.value
+    assert predictions.strategy == Strategy.MODEL_WARM_USERS.value
+    
+    # Check that recommended items are from the items_to_recommend list (not from history)
+    items_to_recommend = [110, 589, 661, 914, 1188, 1193, 1253, 1259, 2398, 3030, 3108, 3408, 2804, 3256, 3578]
+    assert all(int(item_id) in items_to_recommend for item_id in predictions.item_ids)
     
     # Check scores are in reasonable range and sorted in descending order
     assert len(predictions.scores) == 3
     assert all(0.0 < score < 1.0 for score in predictions.scores)
     assert predictions.scores == sorted(predictions.scores, reverse=True)
+    
+    # Check that recommended items are similar to history items (should be items from history that are also in items_to_recommend)
+    # Items 661, 2398, 3108, 3408, 2804, 3256, 3578, 1253 are in both history and items_to_recommend
+    history_items_in_recommend = [661, 2398, 3108, 3408, 2804, 3256, 3578, 1253]
+    # At least some of the recommendations should be from this intersection (since filter_viewed=False)
+    recommended_item_ids_int = [int(item_id) for item_id in predictions.item_ids]
+    assert any(item_id in history_items_in_recommend for item_id in recommended_item_ids_int)

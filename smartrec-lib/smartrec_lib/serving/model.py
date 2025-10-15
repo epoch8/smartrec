@@ -7,6 +7,7 @@ import triton_python_backend_utils as pb_utils
 
 from smartrec_lib.recommenders import (
     RecommenderALS,
+    RecommenderLightFM,
     RecommenderPopular,
     RecommenderRandom,
 )
@@ -45,22 +46,18 @@ class TritonPythonModel:
         strategy_config = pb_utils.get_output_config_by_name(model_config, "strategy")
         # Convert Triton types to numpy types
 
-        self.item_ids_dtype = pb_utils.triton_string_to_numpy(
-            item_ids_config["data_type"]
-        )
+        self.item_ids_dtype = pb_utils.triton_string_to_numpy(item_ids_config["data_type"])
         self.scores_dtype = pb_utils.triton_string_to_numpy(scores_config["data_type"])
 
-        self.strategy_dtype = pb_utils.triton_string_to_numpy(
-            strategy_config["data_type"]
-        )
+        self.strategy_dtype = pb_utils.triton_string_to_numpy(strategy_config["data_type"])
 
         script_path = os.path.dirname(os.path.abspath(__file__))
 
         # TODO переделать
         if "als" in self.model_config["name"]:
             self.model = RecommenderALS.load_model(load_dir=script_path)
-        # if "lightfm" in self.model_config["name"]:
-        #     self.model = RecommenderLightFM.load_model(load_dir=script_path)
+        if "lightfm" in self.model_config["name"]:
+            self.model = RecommenderLightFM.load_model(load_dir=script_path)
         if "popular" in self.model_config["name"]:
             self.model = RecommenderPopular.load_model(load_dir=script_path)
         if "random" in self.model_config["name"]:
@@ -73,15 +70,9 @@ class TritonPythonModel:
 
         # Create output tensors. You need pb_utils.Tensor
         # objects to create pb_utils.InferenceResponse.
-        item_ids_tensor = pb_utils.Tensor(
-            "item_ids", item_ids.values.astype(self.item_ids_dtype)
-        )
-        scores_tensor = pb_utils.Tensor(
-            "scores", scores.values.astype(self.scores_dtype)
-        )
-        strategy_tensor = pb_utils.Tensor(
-            "strategy", strategy.values.astype(self.strategy_dtype)
-        )
+        item_ids_tensor = pb_utils.Tensor("item_ids", item_ids.values.astype(self.item_ids_dtype))
+        scores_tensor = pb_utils.Tensor("scores", scores.values.astype(self.scores_dtype))
+        strategy_tensor = pb_utils.Tensor("strategy", strategy.values.astype(self.strategy_dtype))
 
         inference_response = pb_utils.InferenceResponse(
             output_tensors=[item_ids_tensor, scores_tensor, strategy_tensor]
@@ -115,15 +106,9 @@ class TritonPythonModel:
         # and create a pb_utils.InferenceResponse for each of them.
         for request in requests:
 
-            user_ids = (
-                pb_utils.get_input_tensor_by_name(request, "user_ids")
-                .as_numpy()[0]
-                .decode("utf-8")
-            )
+            user_ids = pb_utils.get_input_tensor_by_name(request, "user_ids").as_numpy()[0].decode("utf-8")
             top_n = pb_utils.get_input_tensor_by_name(request, "top_n").as_numpy()[0]
-            filter_viewed = pb_utils.get_input_tensor_by_name(
-                request, "filter_viewed"
-            ).as_numpy()[0]
+            filter_viewed = pb_utils.get_input_tensor_by_name(request, "filter_viewed").as_numpy()[0]
 
             item_ids = pb_utils.get_input_tensor_by_name(request, "item_ids")
             if item_ids is not None:
@@ -131,25 +116,27 @@ class TritonPythonModel:
             else:
                 item_ids = None
 
-            items_to_recommend = pb_utils.get_input_tensor_by_name(
-                request, "items_to_recommend"
-            )
-
+            items_to_recommend = pb_utils.get_input_tensor_by_name(request, "items_to_recommend")
             if items_to_recommend is not None:
                 items_to_recommend = decoder(items_to_recommend.as_numpy())
             else:
                 items_to_recommend = None
+
+            history = pb_utils.get_input_tensor_by_name(request, "history")
+            if history is not None:
+                history = decoder(history.as_numpy())
+            else:
+                history = None
 
             recommendations = self.model.recommend(
                 user_ids=user_ids,
                 items_to_recommend=items_to_recommend,
                 top_n=top_n,
                 filter_viewed=filter_viewed,
+                history=history,
             )
 
-            inference_response = self.convert_model_response_to_triton_response(
-                recommendations
-            )
+            inference_response = self.convert_model_response_to_triton_response(recommendations)
 
             responses.append(inference_response)
 
