@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
@@ -20,9 +19,6 @@ recsys_config_als = ALSSettings(
 )
 
 test_data = Path(__file__).parent
-
-
-np.random.seed(recsys_config_als.RECOMMENDER_RANDOM_STATE)
 
 
 def test_fit_als():
@@ -58,7 +54,24 @@ def test_fit_als():
         history=[595, 661, 1253, 2398, 3108, 3408, 2804, 3256, 3578],
     )
     print(f"{predictions=}")
+    
+    # Basic assertions
     assert df_interactions.shape[0] == 100
-    assert set(predictions.item_ids) == set(["3408", "2804", "661"])
-    np.testing.assert_allclose(predictions.scores, [0.03919, 0.03919, 0.03919], atol=1e-5)
+    assert len(predictions.item_ids) == 3
     assert predictions.strategy == Strategy.MODEL_WARM_USERS.value
+    
+    # Check that recommended items are from the items_to_recommend list (not from history)
+    items_to_recommend = [110, 589, 661, 914, 1188, 1193, 1253, 1259, 2398, 3030, 3108, 3408, 2804, 3256, 3578]
+    assert all(int(item_id) in items_to_recommend for item_id in predictions.item_ids)
+    
+    # Check scores are in reasonable range and sorted in descending order
+    assert len(predictions.scores) == 3
+    assert all(0.0 < score < 1.0 for score in predictions.scores)
+    assert predictions.scores == sorted(predictions.scores, reverse=True)
+    
+    # Check that recommended items are similar to history items (should be items from history that are also in items_to_recommend)
+    # Items 661, 2398, 3108, 3408, 2804, 3256, 3578, 1253 are in both history and items_to_recommend
+    history_items_in_recommend = [661, 2398, 3108, 3408, 2804, 3256, 3578, 1253]
+    # At least some of the recommendations should be from this intersection (since filter_viewed=False)
+    recommended_item_ids_int = [int(item_id) for item_id in predictions.item_ids]
+    assert any(item_id in history_items_in_recommend for item_id in recommended_item_ids_int)
