@@ -1,6 +1,6 @@
 [project]
 name = "epoch8-smartrec-client"
-version = "0.1.0-dev.2"
+version = "0.1.1-dev.3"
 description = ""
 authors = [{ name = "Shakirov Renat", email = "renat@epoch8.co" }]
 readme = "README.md"
