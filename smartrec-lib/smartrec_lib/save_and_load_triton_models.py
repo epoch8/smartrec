@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,41 @@ CURRENT_DIR = Path(__file__).parent
 SERVING_FOLDER_PATH = CURRENT_DIR.parent / "smartrec_lib/serving"
 
 logger = logging.getLogger("ALS Model saving stage:")
+
+
+def get_s3_filesystem(url: str):
+    """
+    Get S3 filesystem with proper configuration for Yandex Cloud or AWS.
+
+    :param url: S3 URL (e.g., s3://bucket-name)
+    :return: Configured fsspec filesystem
+    """
+    storage_options = {}
+
+    # Check if we have custom S3 endpoint (for Yandex Cloud or other S3-compatible storage)
+    if "S3_ENDPOINT" in os.environ or "AWS_ENDPOINT_URL" in os.environ:
+        endpoint = os.getenv("S3_ENDPOINT") or os.getenv("AWS_ENDPOINT_URL")
+        storage_options["client_kwargs"] = {"endpoint_url": endpoint}
+        logger.info(f"Using custom S3 endpoint: {endpoint}")
+
+        # Add region if specified
+        if "AWS_DEFAULT_REGION" in os.environ:
+            region = os.getenv("AWS_DEFAULT_REGION")
+            storage_options["client_kwargs"]["region_name"] = region
+            logger.info(f"Using region: {region}")
+
+    # Add credentials if specified
+    if "AWS_ACCESS_KEY_ID" in os.environ:
+        key_id = os.getenv("AWS_ACCESS_KEY_ID")
+        storage_options["key"] = key_id
+        logger.info(f"Using AWS_ACCESS_KEY_ID: {key_id[:10]}...")
+    if "AWS_SECRET_ACCESS_KEY" in os.environ:
+        storage_options["secret"] = os.getenv("AWS_SECRET_ACCESS_KEY")
+        logger.info("AWS_SECRET_ACCESS_KEY is set")
+
+    logger.info(f"Connecting to S3 URL: {url}")
+    fs, path = fsspec.url_to_fs(url, **storage_options)
+    return fs, path
 
 
 def upload_model_files(
@@ -28,7 +64,7 @@ def upload_model_files(
     """
     logger.info("Uploading model files to bucket...")
 
-    fs, _ = fsspec.url_to_fs(base_s3_url)
+    fs, _ = get_s3_filesystem(str(base_s3_url))
 
     models_folder_path = base_s3_url / "models"
 
@@ -61,10 +97,17 @@ def create_initial_structure(base_s3_url: Pathy, model_name: str) -> None:
     :param base_s3_url: The base URL in S3 (e.g., s3://bucket-name or s3://bucket-name/folder).
     :param model_name: The name of the model.
     """
-    fs, _ = fsspec.url_to_fs(base_s3_url)
+    fs, _ = get_s3_filesystem(str(base_s3_url))
 
     models_folder_path = base_s3_url / "models" / model_name
-    fs.makedirs(models_folder_path)
+
+    # Try to create directory structure (will skip if exists)
+    try:
+        fs.makedirs(str(models_folder_path), exist_ok=True)
+        logger.info(f"Created/verified directory: {models_folder_path}")
+    except Exception as e:
+        logger.warning(f"Could not create directory {models_folder_path}: {e}")
+        # Continue anyway - directory might already exist
 
     # Copy config.pbtxt and model.py from the local serving folder
     serving_config_path = SERVING_FOLDER_PATH / "config.pbtxt"
@@ -96,7 +139,7 @@ def copy_model_py(src_folder: Pathy, dest_folder: Pathy) -> None:
     :param dest_folder: The destination folder path in S3.
     """
     # might be wrong if different filesystems, example: gs://bucket or s3://bucket
-    fs, _ = fsspec.url_to_fs(src_folder)
+    fs, _ = get_s3_filesystem(str(src_folder))
 
     src_model_py_path = src_folder / "model.py"
     dest_model_py_path = dest_folder / "model.py"
@@ -114,7 +157,7 @@ def clean_old_model_versions(base_s3_url: Pathy, model_name: str, num_to_keep: i
     """
     logger.info("Cleaning old model versions from bucket...")
 
-    fs, _ = fsspec.url_to_fs(base_s3_url)
+    fs, _ = get_s3_filesystem(str(base_s3_url))
 
     s3_url = base_s3_url / "models" / model_name
 
@@ -140,7 +183,7 @@ def edit_config_pbtxt(base_s3_url: Pathy, model_name: str) -> None:
     :param base_s3_url: The base URL in S3 (e.g., s3://bucket-name).
     :param model_name: new model name to be updated in the config.
     """
-    fs, _ = fsspec.url_to_fs(base_s3_url)
+    fs, _ = get_s3_filesystem(str(base_s3_url))
 
     s3_url = base_s3_url / "models" / model_name / "config.pbtxt"
 
@@ -168,7 +211,7 @@ def copy_file(base_s3_url: Pathy, src_file_path: str, new_file_path: str) -> str
 
     :return: path to the copied file.
     """
-    fs, _ = fsspec.url_to_fs(base_s3_url)
+    fs, _ = get_s3_filesystem(str(base_s3_url))
 
     src_url = base_s3_url / src_file_path
     dst_url = base_s3_url / new_file_path
@@ -188,7 +231,7 @@ def load_model_s3(base_s3_url: Pathy, model_name: str) -> tuple:
     """
     logger.info(f"Loading the latest version of the model: {model_name}...")
 
-    fs, _ = fsspec.url_to_fs(base_s3_url)
+    fs, _ = get_s3_filesystem(str(base_s3_url))
 
     s3_url = base_s3_url / "models" / model_name
 
