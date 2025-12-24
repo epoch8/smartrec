@@ -1,5 +1,10 @@
 backend: "python"
 
+parameters {
+  key: "EXECUTION_ENV_PATH"
+  value: { string_value: "../../runtime_envs/runtime_env.tgz" }
+}
+
 input [
   {
     name: "user_ids"
@@ -15,6 +20,12 @@ input [
   },
   {
     name: "items_to_recommend"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+    optional: true
+  },
+  {
+    name: "history"
     data_type: TYPE_STRING
     dims: [ -1 ]
     optional: true

@@ -122,9 +122,13 @@ def create_initial_structure(base_s3_url: Pathy, model_name: str) -> None:
         with open(serving_config_path, "rb") as local_config_file:
             config_s3_file.write(local_config_file.read())
 
+    logger.info("Uploaded config.pbtxt")
+
     with fs.open(serving_model_py_s3_path, "wb") as model_s3_file:
         with open(serving_model_path, "rb") as local_model_file:
             model_s3_file.write(local_model_file.read())
+
+    logger.info("Uploaded model.py")
 
     edit_config_pbtxt(base_s3_url=base_s3_url, model_name=model_name)
 
