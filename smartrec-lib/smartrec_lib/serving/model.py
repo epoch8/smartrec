@@ -1,5 +1,6 @@
 import json
 import os
+import logging
 
 import numpy as np
 import pandas as pd
@@ -11,6 +12,8 @@ from smartrec_lib.recommenders import (
     RecommenderPopular,
     RecommenderRandom,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TritonPythonModel:
@@ -110,6 +113,52 @@ class TritonPythonModel:
             top_n = pb_utils.get_input_tensor_by_name(request, "top_n").as_numpy()[0]
             filter_viewed = pb_utils.get_input_tensor_by_name(request, "filter_viewed").as_numpy()[0]
 
+            # # Check for retrain_mode
+            # retrain_mode_tensor = pb_utils.get_input_tensor_by_name(request, "retrain_mode")
+            # retrain_mode = False
+            # if retrain_mode_tensor is not None:
+            #     retrain_mode = retrain_mode_tensor.as_numpy()[0]
+
+            # # If retrain mode is enabled, process retraining data
+            # if retrain_mode:
+            #     logger.info("Retrain mode enabled - processing retraining request")
+            #     try:
+            #         # Get histories with user interactions
+            #         histories_tensor = pb_utils.get_input_tensor_by_name(request, "histories")
+            #         if histories_tensor is not None:
+            #             histories = decoder(histories_tensor.as_numpy())
+            #             logger.info(f"Received {len(histories)} user histories for retraining")
+
+            #             # Convert to list of tour IDs
+            #             user_tours = []
+            #             for history_str in histories:
+            #                 if history_str:
+            #                     tours = [str(t.strip()) for t in history_str.split(",") if t.strip()]
+            #                     user_tours.extend(tours)
+
+            #             logger.info(f"Total interactions for retraining: {len(user_tours)}")
+
+            #             # Perform model retraining
+            #             await self._perform_model_retraining(user_tours)
+
+            #             # Return success response
+            #             item_ids = pd.DataFrame([["retrain_success"]])
+            #             scores = pd.DataFrame([[1.0]])
+            #             strategy = pd.DataFrame([["retraining_completed"]])
+
+            #             item_ids_tensor = pb_utils.Tensor("item_ids", item_ids.values.astype(self.item_ids_dtype))
+            #             scores_tensor = pb_utils.Tensor("scores", scores.values.astype(self.scores_dtype))
+            #             strategy_tensor = pb_utils.Tensor("strategy", strategy.values.astype(self.strategy_dtype))
+
+            #             inference_response = pb_utils.InferenceResponse(
+            #                 output_tensors=[item_ids_tensor, scores_tensor, strategy_tensor]
+            #             )
+            #             responses.append(inference_response)
+            #             continue
+            #     except Exception as e:
+            #         logger.error(f"Error in retrain mode: {e}", exc_info=True)
+
+            # # Normal inference path
             item_ids = pb_utils.get_input_tensor_by_name(request, "item_ids")
             if item_ids is not None:
                 item_ids = item_ids.as_numpy()[0].decode("utf-8")
@@ -143,6 +192,23 @@ class TritonPythonModel:
         # You should return a list of pb_utils.InferenceResponse. Length
         # of this list must match the length of `requests` list.
         return responses
+
+    # async def _perform_model_retraining(self, tour_ids):
+    #     """
+    #     Perform model retraining on received tour interactions.
+
+    #     This is called when retrain_mode=True in the request.
+    #     """
+    #     try:
+    #         logger.info(f"Starting model retraining with {len(tour_ids)} interactions")
+
+    #         # Note: Full implementation would create a Dataset from tours
+    #         # and call self.model.train_partial(dataset)
+    #         # For now, this is a placeholder that logs the retraining intent
+
+    #         logger.info("Model retraining completed successfully")
+    #     except Exception as e:
+    #         logger.error(f"Failed to perform model retraining: {e}", exc_info=True)
 
     def finalize(self):
         """`finalize` is called only once when the model is being unloaded.

@@ -1,8 +1,9 @@
 backend: "python"
 
-parameters {
-  key: "EXECUTION_ENV_PATH"
-  value: { string_value: "../../runtime_envs/runtime_env.tgz" }
+
+parameters: {
+  key: "EXECUTION_ENV_PATH",
+  value: {string_value: "$$TRITON_MODEL_DIRECTORY/runtime_envs/runtime_env.tgz"}
 }
 
 input [
