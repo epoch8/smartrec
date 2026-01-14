@@ -22,27 +22,19 @@ class TritonModelClient:
             if parsed_url.scheme == "grpc":
                 from tritonclient.grpc import InferenceServerClient, InferInput
 
-                self.client = InferenceServerClient(
-                    parsed_url.netloc
-                )  # Triton GRPC client
-                self.metadata = self.client.get_model_metadata(
-                    self.model_name, as_json=True
-                )
+                self.client = InferenceServerClient(parsed_url.netloc)  # Triton GRPC client
+                self.metadata = self.client.get_model_metadata(self.model_name, as_json=True)
                 self.infer_input = InferInput
 
             else:
                 from tritonclient.http import InferenceServerClient, InferInput
 
-                self.client = InferenceServerClient(
-                    parsed_url.netloc
-                )  # Triton HTTP client
+                self.client = InferenceServerClient(parsed_url.netloc)  # Triton HTTP client
                 self.metadata = self.client.get_model_metadata(self.model_name)
                 self.infer_input = InferInput
 
         except InferenceServerException as e:
-            raise RuntimeError(
-                f"Failed to get metadata for model '{self.model_name}': {str(e)}"
-            )
+            raise RuntimeError(f"Failed to get metadata for model '{self.model_name}': {str(e)}")
 
     def __call__(self, **kwargs) -> Dict:
         """
@@ -53,9 +45,7 @@ class TritonModelClient:
         try:
             response = self.client.infer(model_name=self.model_name, inputs=inputs)
         except InferenceServerException as e:
-            raise RuntimeError(
-                f"Failed to perform inference on model '{self.model_name}': {str(e)}, params {kwargs}"
-            )
+            raise RuntimeError(f"Failed to perform inference on model '{self.model_name}': {str(e)}, params {kwargs}")
 
         result = {}
 
@@ -68,14 +58,10 @@ class TritonModelClient:
                 continue  # Skip if the output data is None
 
             if output["datatype"] == "BYTES":  # If it's BYTES, decode to UTF-8
-                decoded_data = [
-                    x.decode("utf-8") for x in output_data.flatten()
-                ]  # Convert to list of strings
+                decoded_data = [x.decode("utf-8") for x in output_data.flatten()]  # Convert to list of strings
                 result[output_name] = decoded_data
             else:
-                result[output_name] = (
-                    output_data.flatten().tolist()
-                )  # Convert to list of floats
+                result[output_name] = output_data.flatten().tolist()  # Convert to list of floats
 
         return result
 
@@ -88,9 +74,7 @@ class TritonModelClient:
             value = kwargs.get(input_name)
 
             # Пропускаем параметр, если его значение None или это пустой массив/список
-            if value is None or (
-                isinstance(value, (list, np.ndarray)) and len(value) == 0
-            ):
+            if value is None or (isinstance(value, (list, np.ndarray)) and len(value) == 0):
                 logger.info(f"Input {input_name} is None or empty and will be skipped.")
                 continue
 
@@ -98,24 +82,16 @@ class TritonModelClient:
             shape = [int(s) for s in i["shape"]]
 
             # Получаем фактический шейп данных
-            actual_shape = (
-                list(value.shape) if isinstance(value, np.ndarray) else [len(value)]
-            )
+            actual_shape = list(value.shape) if isinstance(value, np.ndarray) else [len(value)]
 
             # Проверяем, что длина actual_shape и shape совпадает
             if len(actual_shape) != len(shape):
-                raise ValueError(
-                    f"Shape mismatch: model expects {shape}, but got {actual_shape} for {input_name}"
-                )
+                raise ValueError(f"Shape mismatch: model expects {shape}, but got {actual_shape} for {input_name}")
 
             # Если в шейпе присутствует -1, заменяем его на фактический размер входных данных
-            shape = [
-                actual_shape[idx] if dim == -1 else dim for idx, dim in enumerate(shape)
-            ]
+            shape = [actual_shape[idx] if dim == -1 else dim for idx, dim in enumerate(shape)]
 
-            infer_input = self.infer_input(
-                name=input_name, shape=shape, datatype=i["datatype"]
-            )
+            infer_input = self.infer_input(name=input_name, shape=shape, datatype=i["datatype"])
 
             # Set the data for the input
             infer_input.set_data_from_numpy(value)
@@ -131,6 +107,7 @@ def recommendations_triton(
     top_n: int,
     filter_viewed: bool,
     items_to_recommend: Optional[List[str]] = None,
+    history: Optional[List[str]] = None,
 ) -> dict:
     """
     Method to obtain recommendations from Triton Inference Server.
@@ -140,20 +117,24 @@ def recommendations_triton(
     :param model_name: Model version name.
     :param top_n: Limit on the number of results.
     :param filter_viewed: Whether to filter viewed items.
+    :param items_to_recommend: Optional list of items to restrict recommendations to.
+    :param history: Optional list of item IDs from user's interaction history (for warm/new users).
 
     :return: Dictionary with model version, data, and strategy.
     """
     model = TritonModelClient(triton_server_url, model_name)
 
     inputs = {
-        "user_ids": np.array(
-            [user_ids], dtype=np.object_
-        ),  # Ensure user_ids is a 1D array
+        "user_ids": np.array([user_ids], dtype=np.object_),  # Ensure user_ids is a 1D array
         "top_n": np.array([top_n], dtype=np.int32),
         "filter_viewed": np.array([filter_viewed], dtype=np.bool_),
     }
     if items_to_recommend is not None:
         inputs["items_to_recommend"] = np.array(items_to_recommend, dtype=np.object_)
+
+    # Pass history for real-time warm user recommendations
+    if history is not None and len(history) > 0:
+        inputs["history"] = np.array(history, dtype=np.object_)
 
     recom_item_users = model(**inputs)
 
