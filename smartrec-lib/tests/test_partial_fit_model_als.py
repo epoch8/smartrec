@@ -1,6 +1,7 @@
 """
 Test partial fit (incremental training) functionality for ALS recommender model.
 """
+
 import pandas as pd
 from rectools.dataset import Dataset
 
@@ -10,7 +11,7 @@ from smartrec_lib.recommenders.recommender_als import RecommenderALS
 
 def test_train_partial_als() -> None:
     """Test that train_partial correctly updates the model with new data."""
-    
+
     # Initial training data
     initial_interactions = pd.DataFrame(
         {
@@ -49,14 +50,14 @@ def test_train_partial_als() -> None:
 
     # Get initial recommendations for user 1
     initial_recommendations = model.recommend(user_ids=1, top_n=5, filter_viewed=False)
-    
+
     assert len(initial_recommendations.item_ids) > 0
     assert initial_recommendations.strategy == Strategy.MODEL_HOT_USERS.value
-    
+
     # Store number of users and items before partial fit
     initial_num_users = len(model.user_ids_hot)
     initial_num_items = len(model.item_ids_hot)
-    
+
     print(f"Initial number of hot users: {initial_num_users}")
     print(f"Initial number of hot items: {initial_num_items}")
     print(f"Initial recommendations: {initial_recommendations.item_ids}")
@@ -118,16 +119,16 @@ def test_train_partial_als() -> None:
     # Test recommendations for a new user
     new_user_recommendations = model.recommend(user_ids=5, top_n=5, filter_viewed=False)
     print(f"New user (5) recommendations: {new_user_recommendations.item_ids}")
-    
+
     assert len(new_user_recommendations.item_ids) > 0
     assert new_user_recommendations.strategy == Strategy.MODEL_HOT_USERS.value
 
-    print("✓ Partial fit test passed successfully!")
+    print("Partial fit test passed successfully!")
 
 
 def test_train_partial_error_before_train():
     """Test that train_partial raises error if called before train."""
-    
+
     settings = ALSSettings(
         ALS_FACTORS=8,
         ALS_ITERATIONS=10,
@@ -154,11 +155,10 @@ def test_train_partial_error_before_train():
         assert False, "Should raise AssertionError when train_partial is called before train"
     except AssertionError as e:
         assert "Model must be trained before train_partial" in str(e)
-        print(f"✓ Expected error caught: {e}")
+        print(f"Expected error caught: {e}")
 
 
 if __name__ == "__main__":
     test_train_partial_als()
     test_train_partial_error_before_train()
     print("\n✅ All train_partial tests passed!")
-

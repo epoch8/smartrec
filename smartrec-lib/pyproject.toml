@@ -1,6 +1,6 @@
 [project]
 name = "epoch8-smartrec-lib"
-version = "0.1.1-dev.6"
+version = "0.1.1-dev.7"
 description = "smartrec main lib"
 readme = "README.md"
 authors = [{ name = "Shakirov Renat", email = "renat@epoch8.co" }]
@@ -31,6 +31,7 @@ packages = ["smartrec_lib"]
 dev = [
     "black>=24.10.0",
     "pytest>=8.3.4",
+    "pandas>=2.0.0",
 ]
 
 [tool.black]

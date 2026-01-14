@@ -43,8 +43,16 @@ class PopularSettings(CommonRecommenderSettings):
 
 
 class Strategy(Enum):
-    MODEL_HOT_AND_COLD_USERS = "model_hot_and_cold_users"
+    # Standard model-based strategies (trained on historical data)
+    MODEL_HOT_USERS = "model_hot_users"  # User in training data, ALS embeddings
+    MODEL_COLD_USERS = "model_cold_users"  # New user, popular items
     MODEL_WARM_USERS = "model_warm_users"
-    MODEL_HOT_USERS = "model_hot_users"
-    MODEL_COLD_USERS = "model_cold_users"
+    MODEL_HOT_AND_COLD_USERS = "model_hot_and_cold_users"
+
+    # Real-time strategies (enriched with session events from Redis)
+    MODEL_REALTIME_HOT_USERS = "model_realtime_hot_users"  # Hot user + real-time events
+    MODEL_REALTIME_WARM_USERS = "model_realtime_warm_users"  # New user with real-time events
+    MODEL_REALTIME_COLD_USERS = "model_realtime_cold_users"  # Cold user with filtered popular by events
+
+    # Fallback
     NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY = "no_strategy_items_to_recommend_filtered_is_empty"
