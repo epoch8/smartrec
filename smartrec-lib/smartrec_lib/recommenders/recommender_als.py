@@ -194,7 +194,9 @@ class RecommenderALS(RecommenderModel):
                 strategy=Strategy.NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY,
             )
 
-        logger.info(f"Predicting for user {user_ids}, history={'present' if history else 'absent'}")
+        logger.info(
+            f"Predicting for user {user_ids}, history={'present' if (history is not None and len(history) > 0) else 'absent'}"
+        )
 
         # Filter items_to_recommend to only those that exist in our training data
         # If items_to_recommend is None, we don't filter and show all items
@@ -206,7 +208,7 @@ class RecommenderALS(RecommenderModel):
 
         # Determine user type and check for real-time history
         is_hot_user = user_ids in self.user_id_map.external_ids and user_ids in self.user_ids_hot
-        has_realtime_history = history and len(history) > 0
+        has_realtime_history = history is not None and len(history) > 0
 
         # HOT USER (in training data)
         if is_hot_user:

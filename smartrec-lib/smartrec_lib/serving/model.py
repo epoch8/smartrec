@@ -172,7 +172,7 @@ class TritonPythonModel:
                 items_to_recommend = None
 
             history = pb_utils.get_input_tensor_by_name(request, "history")
-            if history is not None:
+            if history is not None and len(history.as_numpy()) > 0:
                 history = decoder(history.as_numpy())
             else:
                 history = None
