@@ -154,12 +154,13 @@ def copy_model_py(src_folder: Pathy, dest_folder: Pathy) -> None:
 def clean_old_model_versions(base_s3_url: Pathy, model_name: str, num_to_keep: int) -> None:
     """
     Clean old model versions from the bucket, keeping only a specified number of recent versions.
+    Only removes numeric version folders, skips runtime_envs and other non-version directories.
 
     :param base_s3_url: The base URL in S3 (e.g., s3://bucket-name).
     :param model_name: model name.
     :param num_to_keep: number of recent versions to keep.
     """
-    logger.info("Cleaning old model versions from bucket...")
+    logger.info(f"Cleaning old model versions from bucket (keeping {num_to_keep} latest)...")
 
     fs, _ = get_s3_filesystem(str(base_s3_url))
 
@@ -171,13 +172,29 @@ def clean_old_model_versions(base_s3_url: Pathy, model_name: str, num_to_keep: i
     # Filter to get only directories
     all_folders = [item["name"] for item in all_items if item["type"] == "directory"]
 
+    # Filter only numeric version folders (skip runtime_envs, etc.)
+    numeric_folders = []
+    for folder in all_folders:
+        folder_name = Path(folder).name
+        if folder_name.isdigit():
+            numeric_folders.append(folder)
+
+    if not numeric_folders:
+        logger.info("No versions found to clean")
+        return
+
     # Sort the folders by version (assumed to be numeric)
-    sorted_folders = sorted(all_folders, key=lambda x: int(Path(x).name), reverse=True)
+    sorted_folders = sorted(numeric_folders, key=lambda x: int(Path(x).name), reverse=True)
 
     # Delete the older versions, keeping only the latest 'num_to_keep' versions
-    for folder in sorted_folders[num_to_keep:]:
-        fs.rm(folder, recursive=True)
-        logger.info(f"Deleted folder: {folder}")
+    folders_to_delete = sorted_folders[num_to_keep:]
+    if folders_to_delete:
+        logger.info(f"Deleting {len(folders_to_delete)} old versions...")
+        for folder in folders_to_delete:
+            fs.rm(folder, recursive=True)
+            logger.info(f"Deleted: {Path(folder).name}")
+    else:
+        logger.info("No old versions to delete")
 
 
 def edit_config_pbtxt(base_s3_url: Pathy, model_name: str) -> None:
@@ -225,6 +242,38 @@ def copy_file(base_s3_url: Pathy, src_file_path: str, new_file_path: str) -> str
     return dst_url
 
 
+def get_model_versions(base_s3_url: Pathy, model_name: str) -> list:
+    """
+    Get all numeric version folders for a model, sorted from newest to oldest.
+
+    :param base_s3_url: The base URL in S3 (e.g., s3://bucket-name).
+    :param model_name: The name of the model.
+    :return: List of version folder paths (newest first).
+    """
+    fs, _ = get_s3_filesystem(str(base_s3_url))
+    s3_url = base_s3_url / "models" / model_name
+
+    # List all items (files and directories) in the model folder
+    all_items = fs.ls(s3_url, detail=True)
+
+    # Filter to get only directories
+    all_folders = [item["name"] for item in all_items if item["type"] == "directory"]
+
+    if not all_folders:
+        return []
+
+    # Filter only numeric version folders (skip runtime_envs, etc.)
+    numeric_folders = []
+    for folder in all_folders:
+        folder_name = Path(folder).name
+        if folder_name.isdigit():
+            numeric_folders.append(folder)
+
+    # Sort the folders by version (numeric, newest first)
+    sorted_folders = sorted(numeric_folders, key=lambda x: int(Path(x).name), reverse=True)
+    return sorted_folders
+
+
 def load_model_s3(base_s3_url: Pathy, model_name: str) -> tuple:
     """
     Load the latest version of a model from the bucket.
@@ -235,25 +284,16 @@ def load_model_s3(base_s3_url: Pathy, model_name: str) -> tuple:
     """
     logger.info(f"Loading the latest version of the model: {model_name}...")
 
-    fs, _ = get_s3_filesystem(str(base_s3_url))
+    sorted_folders = get_model_versions(base_s3_url, model_name)
 
-    s3_url = base_s3_url / "models" / model_name
+    if not sorted_folders:
+        raise FileNotFoundError(f"No numeric version folders found in {base_s3_url}/models/{model_name}")
 
-    # List all items (files and directories) in the model folder
-    all_items = fs.ls(s3_url, detail=True)
-
-    # Filter to get only directories
-    all_folders = [item["name"] for item in all_items if item["type"] == "directory"]
-
-    if not all_folders:
-        raise FileNotFoundError(f"No model versions found in {s3_url}")
-
-    # Sort the folders by version (assumed to be numeric)
-    sorted_folders = sorted(all_folders, key=lambda x: int(Path(x).name), reverse=True)
     latest_version_folder = sorted_folders[0]
-    logger.info(f"Latest version folder: {latest_version_folder}")
+    logger.info(f"Latest version folder: {Path(latest_version_folder).name}")
 
     # Load the model from the latest version folder
+    fs, _ = get_s3_filesystem(str(base_s3_url))
     model_pkl_path = Pathy(latest_version_folder) / "model.pkl"
 
     with fs.open(model_pkl_path, "rb") as model_file:
