@@ -29,7 +29,7 @@ class RecommenderModel:
         """
         Perform partial (incremental) training on new data.
         This method is optional and may not be implemented by all models.
-        
+
         Parameters:
             dataset: New dataset with additional interactions to train on.
             **kwargs: Additional model-specific parameters (e.g., epochs for ALS).
