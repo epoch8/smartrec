@@ -1,4 +1,5 @@
 import logging
+from time import perf_counter
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
