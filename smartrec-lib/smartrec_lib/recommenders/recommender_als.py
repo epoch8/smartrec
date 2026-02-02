@@ -1,4 +1,5 @@
 import logging
+from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -221,6 +222,8 @@ class RecommenderALS(RecommenderModel):
         items_to_recommend: Optional[List[int]] = None,
         history: Optional[List[int]] = None,
     ) -> RecomItems:  # Return type is a RecomItems
+        total_start = perf_counter()
+
         if isinstance(items_to_recommend, list) and len(items_to_recommend) == 0:
             return RecomItems(
                 item_ids=[],
@@ -234,11 +237,13 @@ class RecommenderALS(RecommenderModel):
 
         # Filter items_to_recommend to only those that exist in our training data
         # If items_to_recommend is None, we don't filter and show all items
+        filter_start = perf_counter()
         items_to_recommend_filtered = None
         if items_to_recommend is not None:
             items_to_recommend_filtered = [
                 item_to_recommend for item_to_recommend in items_to_recommend if item_to_recommend in self.item_ids_hot
             ]
+        filter_ms = (perf_counter() - filter_start) * 1000
 
         # Determine user type and check for real-time history
         is_hot_user = user_ids in self.user_id_map.external_ids and user_ids in self.user_ids_hot
@@ -258,25 +263,36 @@ class RecommenderALS(RecommenderModel):
                 )
             else:
                 # Standard hot user with ALS
-                logger.info(f"Hot user (standard ALS): user={user_ids}")
-            recos_df = self.model_hot_users.recommend(
-                users=[user_ids],
-                dataset=self.dataset,
-                k=top_n,
-                filter_viewed=filter_viewed,
-                items_to_recommend=(
-                    items_to_recommend_filtered
-                    if items_to_recommend_filtered is None
-                    else list(items_to_recommend_filtered)
-                ),
-            )
-            recos_df = recos_df.sort_values(["user_id", "score"], ascending=False).reset_index(drop=True)
+                als_start = perf_counter()
+                recos_df = self.model_hot_users.recommend(
+                    users=[user_ids],
+                    dataset=self.dataset,
+                    k=top_n,
+                    filter_viewed=filter_viewed,
+                    items_to_recommend=(
+                        items_to_recommend_filtered
+                        if items_to_recommend_filtered is None
+                        else list(items_to_recommend_filtered)
+                    ),
+                )
+                als_ms = (perf_counter() - als_start) * 1000
 
-            return RecomItems(
-                item_ids=recos_df.item_id.astype(str).tolist(),
-                scores=recos_df.score.tolist(),
-                strategy=Strategy.MODEL_HOT_USERS.value,
-            )
+                sort_start = perf_counter()
+                recos_df = recos_df.sort_values(["user_id", "score"], ascending=False).reset_index(drop=True)
+                sort_ms = (perf_counter() - sort_start) * 1000
+
+                total_ms = (perf_counter() - total_start) * 1000
+                logger.info(
+                    f"[ALS HOT] user={user_ids}, top_n={top_n} | "
+                    f"total={total_ms:.1f}ms | filter={filter_ms:.1f}ms, als={als_ms:.1f}ms, sort={sort_ms:.1f}ms | "
+                    f"results={len(recos_df)}"
+                )
+
+                return RecomItems(
+                    item_ids=recos_df.item_id.astype(str).tolist(),
+                    scores=recos_df.score.tolist(),
+                    strategy=Strategy.MODEL_HOT_USERS.value,
+                )
 
         # WARM USER (new user with real-time events)
         elif has_realtime_history:
@@ -291,7 +307,7 @@ class RecommenderALS(RecommenderModel):
 
         # COLD USER (new user without events)
         else:
-            logger.info(f"Cold user (popular items): user={user_ids}")
+            cold_start = perf_counter()
             recos_df = self.model_cold_users.recommend(
                 users=[user_ids],
                 dataset=self.dataset,
@@ -303,7 +319,18 @@ class RecommenderALS(RecommenderModel):
                     else list(items_to_recommend_filtered)
                 ),
             )
+            cold_ms = (perf_counter() - cold_start) * 1000
+
+            sort_start = perf_counter()
             recos_df = recos_df.sort_values(["user_id", "score"], ascending=False).reset_index(drop=True)
+            sort_ms = (perf_counter() - sort_start) * 1000
+
+            total_ms = (perf_counter() - total_start) * 1000
+            logger.info(
+                f"[ALS COLD] user={user_ids}, top_n={top_n} | "
+                f"total={total_ms:.1f}ms | filter={filter_ms:.1f}ms, popular={cold_ms:.1f}ms, sort={sort_ms:.1f}ms | "
+                f"results={len(recos_df)}"
+            )
 
             return RecomItems(
                 item_ids=recos_df.item_id.astype(str).tolist(),
@@ -369,7 +396,11 @@ class RecommenderALS(RecommenderModel):
         Returns:
             RecomItems with MODEL_REALTIME_HOT_USERS strategy
         """
+        total_start = perf_counter()
+        timing = {}
+
         # Get ALS recommendations
+        als_start = perf_counter()
         als_recos = self.model_hot_users.recommend(
             users=[user_ids],
             dataset=self.dataset,
@@ -377,35 +408,35 @@ class RecommenderALS(RecommenderModel):
             filter_viewed=filter_viewed,
             items_to_recommend=(items_to_recommend if items_to_recommend is None else list(items_to_recommend)),
         )
+        timing["als_recommend_ms"] = (perf_counter() - als_start) * 1000
 
         # Parse weighted history
+        parse_start = perf_counter()
         history_items, history_weights = self._parse_weighted_history(history)
+        timing["parse_history_ms"] = (perf_counter() - parse_start) * 1000
 
         # Get item similarity based on recent history with weights
-        history_enc_list = []
-        valid_weights = []
+        convert_start = perf_counter()
 
         # Create a set for O(1) lookups instead of O(n) numpy array checks
         external_ids_set = set(self.item_id_map.external_ids)
 
+        # ОПТИМИЗАЦИЯ: собираем валидные items и конвертируем батчем
+        valid_items_for_convert = []
+        valid_weights_for_convert = []
+
         for item, weight in zip(history_items, history_weights):
-            # Convert string to appropriate type for item_id_map (could be int or str)
-            # _parse_weighted_history returns strings, but item_id_map may contain ints
-            # Try both string and int versions
-            item_for_check = item  # Try as string first
+            item_for_check = item
             if item_for_check not in external_ids_set:
-                # Try as int
                 try:
                     item_for_check = int(item)
                 except (ValueError, TypeError):
-                    pass  # Keep as string
-
+                    pass
             if item_for_check in external_ids_set:
-                item_internal = self.item_id_map.convert_to_internal([item_for_check])[0]
-                history_enc_list.append(item_internal)
-                valid_weights.append(weight)
+                valid_items_for_convert.append(item_for_check)
+                valid_weights_for_convert.append(weight)
 
-        if len(history_enc_list) == 0:
+        if len(valid_items_for_convert) == 0:
             # No valid history - fall back to standard ALS
             logger.warning(f"Hot user {user_ids} has invalid history, using standard ALS")
             als_recos = als_recos.head(top_n)
@@ -415,15 +446,21 @@ class RecommenderALS(RecommenderModel):
                 strategy=Strategy.MODEL_HOT_USERS.value,  # Fallback to standard
             )
 
+        # Батчевая конвертация
+        history_enc_list = self.item_id_map.convert_to_internal(valid_items_for_convert)
+        valid_weights = valid_weights_for_convert
+        timing["convert_ids_ms"] = (perf_counter() - convert_start) * 1000
+
         # Compute weighted item similarity scores for enrichment
+        similarity_start = perf_counter()
         history_enc = np.array(history_enc_list)
         weights_array = np.array(valid_weights)
 
         history_dense_v = np.zeros((1, self.model_hot_users.model.item_factors.shape[0]))
-        # Apply weights to history items (instead of all 1s)
         history_dense_v[0, history_enc] = weights_array
 
         similarity_scores = self.item_similarity.T.dot(history_dense_v.T).T[0]
+        timing["similarity_ms"] = (perf_counter() - similarity_start) * 1000
 
         logger.debug(
             f"Hot user real-time: history_items={len(history_items)}, "
@@ -431,33 +468,39 @@ class RecommenderALS(RecommenderModel):
         )
 
         # Blend ALS scores with similarity scores
-        # Convert ALS recommendations to dict for lookup
-        als_scores_dict = dict(zip(als_recos.item_id, als_recos.score))
+        blend_start = perf_counter()
 
-        blended_scores = []
-        for item_id, als_score in als_scores_dict.items():
-            # Get item internal ID
-            item_internal = self.item_id_map.convert_to_internal([item_id])[0]
-            similarity_score = similarity_scores[item_internal]
+        # ОПТИМИЗАЦИЯ: батчевая конвертация item IDs из ALS результатов
+        als_item_ids = als_recos.item_id.tolist()
+        als_item_ids_internal = self.item_id_map.convert_to_internal(als_item_ids)
 
-            # Blend: 70% ALS + 30% real-time similarity
-            blended_score = 0.7 * als_score + 0.3 * similarity_score
-            blended_scores.append((item_id, blended_score))
+        # Vectorized blending
+        als_scores = als_recos.score.values
+        sim_scores_for_als = similarity_scores[als_item_ids_internal]
 
-        # Sort by blended score
-        blended_scores.sort(key=lambda x: x[1], reverse=True)
+        # Blend: 70% ALS + 30% real-time similarity
+        blended = 0.7 * als_scores + 0.3 * sim_scores_for_als
 
-        # Take top-N
-        top_items = blended_scores[:top_n]
+        # Get top-N indices
+        top_indices = np.argsort(blended)[::-1][:top_n]
+        timing["blend_ms"] = (perf_counter() - blend_start) * 1000
+
+        total_ms = (perf_counter() - total_start) * 1000
 
         logger.info(
-            f"Hot user real-time blend: user={user_ids}, history_size={len(history)}, "
-            f"als_candidates={len(als_recos)}, final_recs={len(top_items)}"
+            f"[ALS HOT+RT] user={user_ids}, history={len(history)}, valid={len(history_enc_list)} | "
+            f"total={total_ms:.1f}ms | "
+            f"als={timing['als_recommend_ms']:.1f}ms, "
+            f"parse={timing['parse_history_ms']:.1f}ms, "
+            f"convert={timing['convert_ids_ms']:.1f}ms, "
+            f"similarity={timing['similarity_ms']:.1f}ms, "
+            f"blend={timing['blend_ms']:.1f}ms | "
+            f"als_candidates={len(als_recos)}, final={len(top_indices)}"
         )
 
         return RecomItems(
-            item_ids=[str(item_id) for item_id, _ in top_items],
-            scores=[score for _, score in top_items],
+            item_ids=[str(als_item_ids[i]) for i in top_indices],
+            scores=[float(blended[i]) for i in top_indices],
             strategy=Strategy.MODEL_REALTIME_HOT_USERS.value,
         )
 
@@ -483,15 +526,17 @@ class RecommenderALS(RecommenderModel):
         Returns:
             RecomItems object with item_ids, scores, and strategy
         """
+        total_start = perf_counter()
+        timing = {}
+
         # Process items_to_recommend - create a mask for filtering
+        items_start = perf_counter()
         items_enc_v = None
         if items_to_recommend is not None:
-            items_to_recommend_enc = [
-                self.item_id_map.convert_to_internal([item])
-                for item in items_to_recommend
-                if item in self.item_id_map.external_ids
-            ]
-            if len(items_to_recommend_enc) > 0:
+            # ОПТИМИЗАЦИЯ: батчим конвертацию ID вместо цикла
+            valid_items = [item for item in items_to_recommend if item in self.item_id_map.external_ids]
+            if len(valid_items) > 0:
+                items_to_recommend_enc = self.item_id_map.convert_to_internal(valid_items)
                 items_enc = np.array(items_to_recommend_enc)
                 items_enc_v = np.zeros((1, self.model_hot_users.model.item_factors.shape[0]))
                 items_enc_v[:, items_enc] = 1
@@ -502,36 +547,35 @@ class RecommenderALS(RecommenderModel):
                     scores=[],
                     strategy=Strategy.NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY,
                 )
+        timing["items_filter_ms"] = (perf_counter() - items_start) * 1000
 
         # Parse weighted history
+        parse_start = perf_counter()
         history_items, history_weights = self._parse_weighted_history(history)
+        timing["parse_history_ms"] = (perf_counter() - parse_start) * 1000
 
         # Process history - convert to internal IDs with weights
-        history_enc_list = []
-        valid_weights = []
+        convert_start = perf_counter()
 
         # Create a set for O(1) lookups instead of O(n) numpy array checks
         external_ids_set = set(self.item_id_map.external_ids)
 
+        # ОПТИМИЗАЦИЯ: собираем валидные items и конвертируем батчем
+        valid_items_for_convert = []
+        valid_weights_for_convert = []
+
         for item, weight in zip(history_items, history_weights):
-            # Convert string to appropriate type for item_id_map (could be int or str)
-            # _parse_weighted_history returns strings, but item_id_map may contain ints
-            # Try both string and int versions
-            item_for_check = item  # Try as string first
+            item_for_check = item
             if item_for_check not in external_ids_set:
-                # Try as int
                 try:
                     item_for_check = int(item)
                 except (ValueError, TypeError):
-                    pass  # Keep as string
-
+                    pass
             if item_for_check in external_ids_set:
-                item_internal = self.item_id_map.convert_to_internal([item_for_check])[0]
-                history_enc_list.append(item_internal)
-                valid_weights.append(weight)
+                valid_items_for_convert.append(item_for_check)
+                valid_weights_for_convert.append(weight)
 
-        if len(history_enc_list) == 0:
-            # No valid history items - все items в истории не найдены в обучении
+        if len(valid_items_for_convert) == 0:
             logger.warning(
                 f"No valid history items found for user {user_ids}. "
                 f"History items: {history_items[:5]}... "
@@ -543,12 +587,19 @@ class RecommenderALS(RecommenderModel):
                 strategy=Strategy.MODEL_REALTIME_WARM_USERS.value,
             )
 
+        # Батчевая конвертация вместо цикла
+        history_enc_list = self.item_id_map.convert_to_internal(valid_items_for_convert)
+        valid_weights = valid_weights_for_convert
+        timing["convert_ids_ms"] = (perf_counter() - convert_start) * 1000
+
+        # Build history vector
+        vector_start = perf_counter()
         history_enc = np.array(history_enc_list)
         weights_array = np.array(valid_weights)
 
         history_dense_v = np.zeros((1, self.model_hot_users.model.item_factors.shape[0]))
-        # Apply weights to history items (higher weight = more influence)
         history_dense_v[0, history_enc] = weights_array
+        timing["build_vector_ms"] = (perf_counter() - vector_start) * 1000
 
         logger.debug(
             f"Warm user history: items={len(history_items)}, valid={len(history_enc_list)}, "
@@ -556,30 +607,72 @@ class RecommenderALS(RecommenderModel):
         )
 
         # Compute weighted similarity scores between history items and all items
+        similarity_start = perf_counter()
         all_scores = self.item_similarity.T.dot(history_dense_v.T).T[0]
-        sorted_item_ids = np.argsort(all_scores)
+        timing["similarity_dot_ms"] = (perf_counter() - similarity_start) * 1000
 
-        # Create mask for filtering
-        items_mask = np.ones(len(sorted_item_ids), dtype=bool)
+        # ОПТИМИЗАЦИЯ: используем argpartition вместо полной сортировки
+        # argpartition - O(n), argsort - O(n log n)
+        sort_start = perf_counter()
 
-        # Filter out already viewed items if requested
-        if filter_viewed:
-            filter_already_liked_mask = ~(history_dense_v[:, sorted_item_ids][0].astype(bool))
-            items_mask = items_mask & filter_already_liked_mask
+        # Нам нужны top-N максимальных значений
+        # argpartition даёт нам индексы так, что все значения >= k-го будут справа
+        n_items = len(all_scores)
+        k = min(top_n * 2, n_items - 1)  # берём с запасом для фильтрации
 
-        # Filter to only requested items if provided
-        if items_to_recommend is not None and items_enc_v is not None:
-            filter_item_mask = items_enc_v[:, sorted_item_ids][0].astype(bool)
-            items_mask = items_mask & filter_item_mask
+        if k > 0 and k < n_items:
+            # Используем -k чтобы получить top-k максимальных
+            top_indices = np.argpartition(all_scores, -k)[-k:]
+            # Сортируем только top-k (маленький массив)
+            top_indices_sorted = top_indices[np.argsort(all_scores[top_indices])[::-1]]
+        else:
+            # Если items мало, используем полную сортировку
+            top_indices_sorted = np.argsort(all_scores)[::-1]
+        timing["sort_ms"] = (perf_counter() - sort_start) * 1000
 
-        sorted_item_ids = sorted_item_ids[items_mask]
+        # Filter
+        filter_start = perf_counter()
+        filtered_indices = []
+        for idx in top_indices_sorted:
+            # Filter viewed
+            if filter_viewed and history_dense_v[0, idx] > 0:
+                continue
+            # Filter to items_to_recommend
+            if items_enc_v is not None and items_enc_v[0, idx] == 0:
+                continue
+            filtered_indices.append(idx)
+            if len(filtered_indices) >= top_n:
+                break
 
-        # Get top-N items (reverse order to get highest scores)
-        nearest_item_ids_enc = sorted_item_ids[: -top_n - 1 : -1]
-        nearest_scores = all_scores[nearest_item_ids_enc]
+        nearest_item_ids_enc = np.array(filtered_indices) if filtered_indices else np.array([], dtype=int)
+        timing["filter_ms"] = (perf_counter() - filter_start) * 1000
 
-        # Convert to external IDs and return
-        item_ids_external = self.item_id_map.convert_to_external(nearest_item_ids_enc)
+        # Get scores and convert to external IDs
+        output_start = perf_counter()
+        if len(nearest_item_ids_enc) > 0:
+            nearest_scores = all_scores[nearest_item_ids_enc]
+            item_ids_external = self.item_id_map.convert_to_external(nearest_item_ids_enc)
+        else:
+            nearest_scores = np.array([])
+            item_ids_external = []
+        timing["output_ms"] = (perf_counter() - output_start) * 1000
+
+        total_ms = (perf_counter() - total_start) * 1000
+
+        # Логирование профиля
+        logger.info(
+            f"[ALS WARM] user={user_ids}, history={len(history)}, valid={len(history_enc_list)}, top_n={top_n} | "
+            f"total={total_ms:.1f}ms | "
+            f"items_filter={timing['items_filter_ms']:.1f}ms, "
+            f"parse={timing['parse_history_ms']:.1f}ms, "
+            f"convert={timing['convert_ids_ms']:.1f}ms, "
+            f"vector={timing['build_vector_ms']:.1f}ms, "
+            f"similarity={timing['similarity_dot_ms']:.1f}ms, "
+            f"sort={timing['sort_ms']:.1f}ms, "
+            f"filter={timing['filter_ms']:.1f}ms, "
+            f"output={timing['output_ms']:.1f}ms | "
+            f"results={len(nearest_item_ids_enc)}"
+        )
 
         return RecomItems(
             item_ids=[str(item_id) for item_id in item_ids_external],
