@@ -101,6 +101,42 @@ class TritonModelClient:
         return placeholders
 
 
+def recommendations_triton_with_client(
+    client: TritonModelClient,
+    user_ids: str,
+    top_n: int,
+    filter_viewed: bool,
+    items_to_recommend: Optional[List[str]] = None,
+    history: Optional[List[str]] = None,
+) -> dict:
+    """
+    Method to obtain recommendations using an existing Triton client (connection pooling).
+
+    :param client: Existing TritonModelClient instance (for connection reuse).
+    :param user_ids: The list of user IDs.
+    :param top_n: Limit on the number of results.
+    :param filter_viewed: Whether to filter viewed items.
+    :param items_to_recommend: Optional list of items to restrict recommendations to.
+    :param history: Optional list of item IDs from user's interaction history (for warm/new users).
+
+    :return: Dictionary with model version, data, and strategy.
+    """
+    inputs = {
+        "user_ids": np.array([user_ids], dtype=np.object_),
+        "top_n": np.array([top_n], dtype=np.int32),
+        "filter_viewed": np.array([filter_viewed], dtype=np.bool_),
+    }
+    if items_to_recommend is not None:
+        inputs["items_to_recommend"] = np.array(items_to_recommend, dtype=np.object_)
+
+    if history is not None and len(history) > 0:
+        inputs["history"] = np.array(history, dtype=np.object_)
+
+    recom_item_users = client(**inputs)
+
+    return {"model_version": client.metadata["versions"][0], "data": recom_item_users}
+
+
 def recommendations_triton(
     triton_server_url: str,
     user_ids: str,
@@ -112,6 +148,7 @@ def recommendations_triton(
 ) -> dict:
     """
     Method to obtain recommendations from Triton Inference Server.
+    Creates a new client on each call - use recommendations_triton_with_client() for connection pooling.
 
     :param triton_server_url: URL to Triton.
     :param user_ids: The list of user IDs.
@@ -124,19 +161,11 @@ def recommendations_triton(
     :return: Dictionary with model version, data, and strategy.
     """
     model = TritonModelClient(triton_server_url, model_name)
-
-    inputs = {
-        "user_ids": np.array([user_ids], dtype=np.object_),  # Ensure user_ids is a 1D array
-        "top_n": np.array([top_n], dtype=np.int32),
-        "filter_viewed": np.array([filter_viewed], dtype=np.bool_),
-    }
-    if items_to_recommend is not None:
-        inputs["items_to_recommend"] = np.array(items_to_recommend, dtype=np.object_)
-
-    # Pass history for real-time warm user recommendations
-    if history is not None and len(history) > 0:
-        inputs["history"] = np.array(history, dtype=np.object_)
-
-    recom_item_users = model(**inputs)
-
-    return {"model_version": model.metadata["versions"][0], "data": recom_item_users}
+    return recommendations_triton_with_client(
+        client=model,
+        user_ids=user_ids,
+        top_n=top_n,
+        filter_viewed=filter_viewed,
+        items_to_recommend=items_to_recommend,
+        history=history,
+    )
