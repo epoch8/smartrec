@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import logging
 from time import perf_counter
 
@@ -14,7 +15,14 @@ from smartrec_lib.recommenders import (
     RecommenderRandom,
 )
 
-logger = logging.getLogger(__name__)
+# Явно настраиваем логгер на stdout — без этого логи не видны в kubectl logs
+logger = logging.getLogger("triton_model")
+logger.setLevel(logging.DEBUG)
+if not logger.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setLevel(logging.DEBUG)
+    _handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s"))
+    logger.addHandler(_handler)
 
 
 class TritonPythonModel:
@@ -114,6 +122,8 @@ class TritonPythonModel:
         execute_start = perf_counter()
         decoder = np.vectorize(lambda x: x.decode("UTF-8"))
 
+        print(f"[TRITON EXECUTE] batch_size={len(requests)}", flush=True)
+
         responses = []
 
         # Every Python backend must iterate over everyone of the requests
@@ -170,18 +180,21 @@ class TritonPythonModel:
             items_count = len(items_to_recommend) if items_to_recommend is not None else 0
             result_count = len(recommendations.item_ids) if recommendations.item_ids is not None else 0
 
-            logger.info(
+            log_msg = (
                 f"[TRITON MODEL] user={user_ids}, top_n={top_n}, history={history_size}, items_to_rec={items_count} | "
                 f"total={request_ms:.1f}ms | parse={parse_ms:.1f}ms, recommend={recommend_ms:.1f}ms, convert={convert_ms:.1f}ms | "
                 f"strategy={recommendations.strategy}, results={result_count}"
             )
+            logger.info(log_msg)
+            print(log_msg, flush=True)
 
             responses.append(inference_response)
 
-        # Логирование общего времени batch execute
+        # Логирование общего времени batch execute (всегда, даже для 1 запроса)
         execute_ms = (perf_counter() - execute_start) * 1000
-        if len(requests) > 1:
-            logger.info(f"[TRITON MODEL BATCH] requests={len(requests)}, total_execute={execute_ms:.1f}ms")
+        execute_log = f"[TRITON MODEL EXECUTE] requests={len(requests)}, total_execute={execute_ms:.1f}ms"
+        logger.info(execute_log)
+        print(execute_log, flush=True)
 
         # You should return a list of pb_utils.InferenceResponse. Length
         # of this list must match the length of `requests` list.
