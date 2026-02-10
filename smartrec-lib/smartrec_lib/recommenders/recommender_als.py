@@ -53,6 +53,8 @@ class RecommenderALS(RecommenderModel):
         self.dataset: Dataset = None  # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
+        self.user_item_matrix_binary = None
+        self.implicit_neginf_score = None
 
     @classmethod
     def compute_item_similarity(cls, model: ImplicitALSWrapperModel, k_max_values: int = 100) -> np.ndarray:
@@ -89,6 +91,69 @@ class RecommenderALS(RecommenderModel):
         sparse_matrix = sparse.csr_matrix(matrix)
 
         return sparse_matrix
+
+    def _ensure_lookup_caches(self) -> None:
+        if not hasattr(self, "user_item_matrix_binary"):
+            self.user_item_matrix_binary = None
+        if not hasattr(self, "implicit_neginf_score") or self.implicit_neginf_score is None:
+            self.implicit_neginf_score = float(
+                np.asarray(
+                    np.asarray(-np.finfo(np.float32).max, dtype=np.float32).view(np.uint32) - 1,
+                    dtype=np.uint32,
+                ).view(np.float32)
+            )
+
+    def _ensure_user_item_matrix_binary(self) -> None:
+        self._ensure_lookup_caches()
+        if self.user_item_matrix_binary is None:
+            build_start = perf_counter()
+            self.user_item_matrix_binary = self.dataset.get_user_item_matrix(
+                include_weights=False,
+                include_warm_users=True,
+                include_warm_items=True,
+                dtype=np.float32,
+            )
+            build_ms = (perf_counter() - build_start) * 1000
+            logger.info(f"[ALS CACHE] user_item_matrix_binary_built={build_ms:.1f}ms")
+
+    def _recommend_hot_user_candidates(
+        self,
+        user_ids: Any,
+        top_n: int,
+        filter_viewed: bool,
+        items_to_recommend: Optional[List[int]],
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        self._ensure_user_item_matrix_binary()
+
+        user_id_internal = int(self.user_id_map.convert_to_internal([user_ids])[0])
+        user_items_row = self.user_item_matrix_binary[user_id_internal]
+
+        items_internal = None
+        if items_to_recommend is not None:
+            if len(items_to_recommend) == 0:
+                return np.array([], dtype=int), np.array([], dtype=object), np.array([], dtype=np.float32)
+            items_internal = np.asarray(self.item_id_map.convert_to_internal(items_to_recommend), dtype=np.int32)
+
+        item_ids_internal, scores = self.model_hot_users.model.recommend(
+            userid=user_id_internal,
+            user_items=user_items_row,
+            N=top_n,
+            filter_already_liked_items=filter_viewed,
+            items=items_internal,
+        )
+
+        item_ids_internal = np.atleast_1d(np.asarray(item_ids_internal))
+        scores = np.atleast_1d(np.asarray(scores, dtype=np.float32))
+
+        valid_mask = np.isfinite(scores) & (scores > self.implicit_neginf_score)
+        item_ids_internal = item_ids_internal[valid_mask]
+        scores = scores[valid_mask]
+
+        if len(item_ids_internal) == 0:
+            return np.array([], dtype=int), np.array([], dtype=object), np.array([], dtype=np.float32)
+
+        item_ids_external = np.asarray(self.item_id_map.convert_to_external(item_ids_internal))
+        return item_ids_internal, item_ids_external, scores
 
     def train(self, dataset: Dataset):
         assert self.recsys_config is not None
@@ -223,6 +288,7 @@ class RecommenderALS(RecommenderModel):
         history: Optional[List[int]] = None,
     ) -> RecomItems:  # Return type is a RecomItems
         total_start = perf_counter()
+        self._ensure_lookup_caches()
 
         if isinstance(items_to_recommend, list) and len(items_to_recommend) == 0:
             return RecomItems(
@@ -264,33 +330,24 @@ class RecommenderALS(RecommenderModel):
             else:
                 # Standard hot user with ALS
                 als_start = perf_counter()
-                recos_df = self.model_hot_users.recommend(
-                    users=[user_ids],
-                    dataset=self.dataset,
-                    k=top_n,
+                _, item_ids_external, scores = self._recommend_hot_user_candidates(
+                    user_ids=user_ids,
+                    top_n=top_n,
                     filter_viewed=filter_viewed,
-                    items_to_recommend=(
-                        items_to_recommend_filtered
-                        if items_to_recommend_filtered is None
-                        else list(items_to_recommend_filtered)
-                    ),
+                    items_to_recommend=items_to_recommend_filtered,
                 )
                 als_ms = (perf_counter() - als_start) * 1000
-
-                sort_start = perf_counter()
-                recos_df = recos_df.sort_values(["user_id", "score"], ascending=False).reset_index(drop=True)
-                sort_ms = (perf_counter() - sort_start) * 1000
 
                 total_ms = (perf_counter() - total_start) * 1000
                 logger.info(
                     f"[ALS HOT] user={user_ids}, top_n={top_n} | "
-                    f"total={total_ms:.1f}ms | filter={filter_ms:.1f}ms, als={als_ms:.1f}ms, sort={sort_ms:.1f}ms | "
-                    f"results={len(recos_df)}"
+                    f"total={total_ms:.1f}ms | filter={filter_ms:.1f}ms, als={als_ms:.1f}ms | "
+                    f"results={len(item_ids_external)}"
                 )
 
                 return RecomItems(
-                    item_ids=recos_df.item_id.astype(str).tolist(),
-                    scores=recos_df.score.tolist(),
+                    item_ids=[str(item_id) for item_id in item_ids_external],
+                    scores=scores.astype(float).tolist(),
                     strategy=Strategy.MODEL_HOT_USERS.value,
                 )
 
@@ -401,14 +458,20 @@ class RecommenderALS(RecommenderModel):
 
         # Get ALS recommendations
         als_start = perf_counter()
-        als_recos = self.model_hot_users.recommend(
-            users=[user_ids],
-            dataset=self.dataset,
-            k=top_n * 2,  # Get more for blending
+        als_item_ids_internal, als_item_ids_external, als_scores = self._recommend_hot_user_candidates(
+            user_ids=user_ids,
+            top_n=top_n * 2,  # Get more for blending
             filter_viewed=filter_viewed,
-            items_to_recommend=(items_to_recommend if items_to_recommend is None else list(items_to_recommend)),
+            items_to_recommend=items_to_recommend,
         )
         timing["als_recommend_ms"] = (perf_counter() - als_start) * 1000
+
+        if len(als_item_ids_internal) == 0:
+            return RecomItems(
+                item_ids=[],
+                scores=[],
+                strategy=Strategy.MODEL_HOT_USERS.value,
+            )
 
         # Parse weighted history
         parse_start = perf_counter()
@@ -439,10 +502,9 @@ class RecommenderALS(RecommenderModel):
         if len(valid_items_for_convert) == 0:
             # No valid history - fall back to standard ALS
             logger.warning(f"Hot user {user_ids} has invalid history, using standard ALS")
-            als_recos = als_recos.head(top_n)
             return RecomItems(
-                item_ids=als_recos.item_id.astype(str).tolist(),
-                scores=als_recos.score.tolist(),
+                item_ids=[str(item_id) for item_id in als_item_ids_external[:top_n]],
+                scores=als_scores[:top_n].astype(float).tolist(),
                 strategy=Strategy.MODEL_HOT_USERS.value,  # Fallback to standard
             )
 
@@ -470,12 +532,7 @@ class RecommenderALS(RecommenderModel):
         # Blend ALS scores with similarity scores
         blend_start = perf_counter()
 
-        # ОПТИМИЗАЦИЯ: батчевая конвертация item IDs из ALS результатов
-        als_item_ids = als_recos.item_id.tolist()
-        als_item_ids_internal = self.item_id_map.convert_to_internal(als_item_ids)
-
         # Vectorized blending
-        als_scores = als_recos.score.values
         sim_scores_for_als = similarity_scores[als_item_ids_internal]
 
         # Blend: 70% ALS + 30% real-time similarity
@@ -495,11 +552,11 @@ class RecommenderALS(RecommenderModel):
             f"convert={timing['convert_ids_ms']:.1f}ms, "
             f"similarity={timing['similarity_ms']:.1f}ms, "
             f"blend={timing['blend_ms']:.1f}ms | "
-            f"als_candidates={len(als_recos)}, final={len(top_indices)}"
+            f"als_candidates={len(als_item_ids_internal)}, final={len(top_indices)}"
         )
 
         return RecomItems(
-            item_ids=[str(als_item_ids[i]) for i in top_indices],
+            item_ids=[str(als_item_ids_external[i]) for i in top_indices],
             scores=[float(blended[i]) for i in top_indices],
             strategy=Strategy.MODEL_REALTIME_HOT_USERS.value,
         )
@@ -696,12 +753,15 @@ class RecommenderALS(RecommenderModel):
             raise Exception("There isn't model_version, please fill this field")
 
         logger.info(f"Saving model to {base_s3_url}")
+        user_item_matrix_binary_cache = self.user_item_matrix_binary
+        self.user_item_matrix_binary = None
         upload_model_files(
             base_s3_url,
             model_name=self.model_name,
             model_version=self.model_version,
             model_data=self.__dict__,
         )
+        self.user_item_matrix_binary = user_item_matrix_binary_cache
         logger.info("Model saved successfully!")
         clean_old_model_versions(base_s3_url=base_s3_url, model_name=self.model_name, num_to_keep=num_to_keep)
         logger.info("Old models deleted!")

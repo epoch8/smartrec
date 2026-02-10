@@ -25,10 +25,55 @@ if not logger.handlers:
     logger.addHandler(_handler)
 
 
+class _TritonLoggingHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+            if record.levelno >= logging.ERROR:
+                pb_utils.Logger.log_error(message)
+            elif record.levelno >= logging.WARNING:
+                if hasattr(pb_utils.Logger, "log_warn"):
+                    pb_utils.Logger.log_warn(message)
+                elif hasattr(pb_utils.Logger, "log_warning"):
+                    pb_utils.Logger.log_warning(message)
+                else:
+                    pb_utils.Logger.log_info(f"[WARN] {message}")
+            else:
+                pb_utils.Logger.log_info(message)
+        except Exception:
+            return
+
+
 class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
     that is created must have "TritonPythonModel" as the class name.
     """
+
+    @staticmethod
+    def _log_info(message: str) -> None:
+        pb_utils.Logger.log_info(message)
+
+    @staticmethod
+    def _configure_python_logging_bridge() -> None:
+        recommender_logger_names = (
+            "ALS Model",
+            "LightFM Model",
+            "Popular Model",
+            "Random Model",
+            "Base Model",
+            "ALS Model saving stage:",
+        )
+        for logger_name in recommender_logger_names:
+            target_logger = logging.getLogger(logger_name)
+            has_bridge = any(isinstance(handler, _TritonLoggingHandler) for handler in target_logger.handlers)
+            if has_bridge:
+                continue
+            handler = _TritonLoggingHandler()
+            handler.setLevel(logging.INFO)
+            handler.setFormatter(logging.Formatter("%(message)s"))
+            target_logger.addHandler(handler)
+            target_logger.setLevel(logging.INFO)
+            target_logger.propagate = False
 
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
@@ -47,8 +92,13 @@ class TritonPythonModel:
         """
         init_start = perf_counter()
 
+        os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        os.environ.setdefault("MKL_NUM_THREADS", "1")
+
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args["model_config"])
+        self._configure_python_logging_bridge()
 
         # Get item_ids configuration
         item_ids_config = pb_utils.get_output_config_by_name(model_config, "item_ids")
@@ -78,10 +128,17 @@ class TritonPythonModel:
             self.model = RecommenderRandom.load_model(load_dir=script_path)
         model_load_ms = (perf_counter() - model_load_start) * 1000
 
+        cache_warm_ms = 0.0
+        if "als" in self.model_config["name"] and hasattr(self.model, "_ensure_user_item_matrix_binary"):
+            cache_warm_start = perf_counter()
+            self.model._ensure_lookup_caches()
+            self.model._ensure_user_item_matrix_binary()
+            cache_warm_ms = (perf_counter() - cache_warm_start) * 1000
+
         init_ms = (perf_counter() - init_start) * 1000
-        logger.info(
+        self._log_info(
             f"[TRITON MODEL INIT] model={self.model_config['name']} | "
-            f"total={init_ms:.1f}ms, model_load={model_load_ms:.1f}ms"
+            f"total={init_ms:.1f}ms, model_load={model_load_ms:.1f}ms, cache_warm={cache_warm_ms:.1f}ms"
         )
 
     def convert_model_response_to_triton_response(self, model_responses):
@@ -185,6 +242,7 @@ class TritonPythonModel:
                 f"total={request_ms:.1f}ms | parse={parse_ms:.1f}ms, recommend={recommend_ms:.1f}ms, convert={convert_ms:.1f}ms | "
                 f"strategy={recommendations.strategy}, results={result_count}"
             )
+            self._log_info(log_msg)
             logger.info(log_msg)
             print(log_msg, flush=True)
 
@@ -193,6 +251,7 @@ class TritonPythonModel:
         # Логирование общего времени batch execute (всегда, даже для 1 запроса)
         execute_ms = (perf_counter() - execute_start) * 1000
         execute_log = f"[TRITON MODEL EXECUTE] requests={len(requests)}, total_execute={execute_ms:.1f}ms"
+        self._log_info(execute_log)
         logger.info(execute_log)
         print(execute_log, flush=True)
 
