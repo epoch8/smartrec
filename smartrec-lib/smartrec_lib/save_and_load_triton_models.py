@@ -1,5 +1,6 @@
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -78,10 +79,19 @@ def upload_model_files(
     if not fs.exists(model_version_folder):
         fs.makedirs(model_version_folder)
 
-    # Upload the model.pkl directly from memory
+    # Serialize to local temp file first, then upload to S3.
+    # Streaming dill.dump directly into S3 can stall the connection
+    # and cause Airflow to kill the pod due to log-stream timeout.
     model_pkl_path = model_version_folder / "model.pkl"
-    with fs.open(model_pkl_path, "wb") as file:
-        dill.dump(model_data, file)
+    with tempfile.NamedTemporaryFile(suffix=".pkl", delete=True) as tmp:
+        logger.info("Serializing model to local temp file...")
+        dill.dump(model_data, tmp)
+        tmp_size = tmp.tell()
+        logger.info(f"Serialized model size: {tmp_size / 1024 / 1024:.1f} MB")
+        tmp.flush()
+
+        logger.info(f"Uploading model.pkl to {model_pkl_path}...")
+        fs.put(tmp.name, str(model_pkl_path))
 
     logger.info(f"Uploaded model.pkl for {model_name}, version {model_version}")
 
