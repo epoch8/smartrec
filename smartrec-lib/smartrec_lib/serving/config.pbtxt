@@ -62,10 +62,10 @@ output [
   }
 ]
 
-max_batch_size: 1
-
 dynamic_batching {
-  max_queue_delay_microseconds: 0
+  default_queue_policy {
+    default_timeout_microseconds: 1000000
+  }
 }
 
-instance_group [{ kind: KIND_CPU, count: 1 }]
+instance_group [{ kind: KIND_CPU }]
