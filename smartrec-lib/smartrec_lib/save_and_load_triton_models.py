@@ -49,6 +49,30 @@ def get_s3_filesystem(url: str):
     return fs, path
 
 
+def _sync_serving_files(fs, model_s3_folder: Pathy, model_name: str) -> None:
+    """
+    Sync config.pbtxt and model.py from local serving folder to S3 base model folder.
+    Called on every model upload to keep serving files up to date.
+    """
+    # config.pbtxt
+    local_config = SERVING_FOLDER_PATH / "config.pbtxt"
+    with open(local_config, "r") as f:
+        content = f.read()
+    if f'name: "{model_name}"' not in content:
+        content = content.rstrip("\n") + f'\nname: "{model_name}"\n'
+    with fs.open(model_s3_folder / "config.pbtxt", "w") as f:
+        f.write(content)
+    logger.info("Synced config.pbtxt")
+
+    # model.py
+    local_model = SERVING_FOLDER_PATH / "model.py"
+    with open(local_model, "rb") as f:
+        data = f.read()
+    with fs.open(model_s3_folder / "model.py", "wb") as f:
+        f.write(data)
+    logger.info("Synced model.py")
+
+
 def upload_model_files(
     base_s3_url: Pathy,
     model_version: str,
@@ -95,9 +119,13 @@ def upload_model_files(
 
     logger.info(f"Uploaded model.pkl for {model_name}, version {model_version}")
 
-    # Copy the existing model.py into the new version folder
-    copy_model_py(models_folder_path / model_name, model_version_folder)
-    logger.info(f"Copied model.py for {model_name}, version {model_version}")
+    # Sync config.pbtxt and model.py from local serving folder to base S3 folder
+    model_base_folder = models_folder_path / model_name
+    _sync_serving_files(fs, model_base_folder, model_name)
+
+    # Copy model.py from base folder into the version folder (Triton needs it there)
+    copy_model_py(model_base_folder, model_version_folder)
+    logger.info(f"Copied model.py to version {model_version}")
 
 
 def create_initial_structure(base_s3_url: Pathy, model_name: str) -> None:
@@ -111,37 +139,13 @@ def create_initial_structure(base_s3_url: Pathy, model_name: str) -> None:
 
     models_folder_path = base_s3_url / "models" / model_name
 
-    # Try to create directory structure (will skip if exists)
     try:
         fs.makedirs(str(models_folder_path), exist_ok=True)
         logger.info(f"Created/verified directory: {models_folder_path}")
     except Exception as e:
         logger.warning(f"Could not create directory {models_folder_path}: {e}")
-        # Continue anyway - directory might already exist
 
-    # Copy config.pbtxt and model.py from the local serving folder
-    serving_config_path = SERVING_FOLDER_PATH / "config.pbtxt"
-    serving_model_path = SERVING_FOLDER_PATH / "model.py"
-
-    serving_config_s3_path = models_folder_path / "config.pbtxt"
-    serving_model_py_s3_path = models_folder_path / "model.py"
-
-    logger.info("Creating initial structure with config.pbtxt and model.py...")
-
-    with fs.open(serving_config_s3_path, "wb") as config_s3_file:
-        with open(serving_config_path, "rb") as local_config_file:
-            config_s3_file.write(local_config_file.read())
-
-    logger.info("Uploaded config.pbtxt")
-
-    with fs.open(serving_model_py_s3_path, "wb") as model_s3_file:
-        with open(serving_model_path, "rb") as local_model_file:
-            model_s3_file.write(local_model_file.read())
-
-    logger.info("Uploaded model.py")
-
-    edit_config_pbtxt(base_s3_url=base_s3_url, model_name=model_name)
-
+    _sync_serving_files(fs, models_folder_path, model_name)
     logger.info("Initial structure created successfully.")
 
 
@@ -206,30 +210,6 @@ def clean_old_model_versions(base_s3_url: Pathy, model_name: str, num_to_keep: i
     else:
         logger.info("No old versions to delete")
 
-
-def edit_config_pbtxt(base_s3_url: Pathy, model_name: str) -> None:
-    """
-    Update the base config.pbtxt in the specified directory.
-
-    :param base_s3_url: The base URL in S3 (e.g., s3://bucket-name).
-    :param model_name: new model name to be updated in the config.
-    """
-    fs, _ = get_s3_filesystem(str(base_s3_url))
-
-    s3_url = base_s3_url / "models" / model_name / "config.pbtxt"
-
-    # Read the existing config file
-    with fs.open(s3_url, "r") as f:
-        file_content = f.read()
-
-    # Modify the last line of the config file
-    lines = file_content.split("\n")
-    lines[-1] = f'name: "{model_name}"'
-    new_file_content = "\n".join(lines)
-
-    # Write the updated config back to S3
-    with fs.open(s3_url, "w") as f:
-        f.write(new_file_content)
 
 
 def copy_file(base_s3_url: Pathy, src_file_path: str, new_file_path: str) -> str:
