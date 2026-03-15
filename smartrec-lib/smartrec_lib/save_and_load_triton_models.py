@@ -60,7 +60,7 @@ def _sync_serving_files(fs, model_s3_folder: Pathy, model_name: str) -> None:
         content = f.read()
     if f'name: "{model_name}"' not in content:
         content = content.rstrip("\n") + f'\nname: "{model_name}"\n'
-    with fs.open(model_s3_folder / "config.pbtxt", "w") as f:
+    with fs.open(str(model_s3_folder / "config.pbtxt"), "w") as f:
         f.write(content)
     logger.info("Synced config.pbtxt")
 
@@ -68,7 +68,7 @@ def _sync_serving_files(fs, model_s3_folder: Pathy, model_name: str) -> None:
     local_model = SERVING_FOLDER_PATH / "model.py"
     with open(local_model, "rb") as f:
         data = f.read()
-    with fs.open(model_s3_folder / "model.py", "wb") as f:
+    with fs.open(str(model_s3_folder / "model.py"), "wb") as f:
         f.write(data)
     logger.info("Synced model.py")
 
@@ -94,14 +94,14 @@ def upload_model_files(
     models_folder_path = base_s3_url / "models"
 
     # Check if the "models" folder exists
-    if not fs.exists(models_folder_path / model_name):
+    if not fs.exists(str(models_folder_path / model_name)):
         logger.info("Models folder does not exist, creating structure...")
         create_initial_structure(base_s3_url, model_name)
 
     # Create the new version folder
     model_version_folder = models_folder_path / model_name / model_version
-    if not fs.exists(model_version_folder):
-        fs.makedirs(model_version_folder)
+    if not fs.exists(str(model_version_folder)):
+        fs.makedirs(str(model_version_folder))
 
     # Serialize to local temp file first, then upload to S3.
     # Streaming dill.dump directly into S3 can stall the connection
@@ -181,7 +181,7 @@ def clean_old_model_versions(base_s3_url: Pathy, model_name: str, num_to_keep: i
     s3_url = base_s3_url / "models" / model_name
 
     # List all items (files and directories) in the folder
-    all_items = fs.ls(s3_url, detail=True)
+    all_items = fs.ls(str(s3_url), detail=True)
 
     # Filter to get only directories
     all_folders = [item["name"] for item in all_items if item["type"] == "directory"]
@@ -227,7 +227,7 @@ def copy_file(base_s3_url: Pathy, src_file_path: str, new_file_path: str) -> str
     src_url = base_s3_url / src_file_path
     dst_url = base_s3_url / new_file_path
 
-    fs.copy(src_url, dst_url)
+    fs.copy(str(src_url), str(dst_url))
 
     return dst_url
 
@@ -244,7 +244,7 @@ def get_model_versions(base_s3_url: Pathy, model_name: str) -> list:
     s3_url = base_s3_url / "models" / model_name
 
     # List all items (files and directories) in the model folder
-    all_items = fs.ls(s3_url, detail=True)
+    all_items = fs.ls(str(s3_url), detail=True)
 
     # Filter to get only directories
     all_folders = [item["name"] for item in all_items if item["type"] == "directory"]
@@ -286,7 +286,7 @@ def load_model_s3(base_s3_url: Pathy, model_name: str) -> tuple:
     fs, _ = get_s3_filesystem(str(base_s3_url))
     model_pkl_path = Pathy(latest_version_folder) / "model.pkl"
 
-    with fs.open(model_pkl_path, "rb") as model_file:
+    with fs.open(str(model_pkl_path), "rb") as model_file:
         model = dill.load(model_file)
 
     # Extract the version from the folder name
