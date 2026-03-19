@@ -16,8 +16,8 @@ dependencies = [
 [tool.hatch.build.targets.wheel]
 packages = ["smartrec_client"]
 
-[tool.uv]
-dev-dependencies = ["pytest"]
+[dependency-groups]
+dev = ["pytest"]
 
 [tool.isort]
 profile = "black"
