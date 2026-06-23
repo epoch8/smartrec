@@ -1,8 +1,8 @@
 # smartrec
 
-Internal ML library for the **YouTravel recommender system**. It gives a single
-interface to train recommendation models and serve them from Triton Inference
-Server.
+A general-purpose recommendation library. It provides a single interface to train
+recommendation models and serve them from Triton Inference Server, independent of
+any particular product or domain.
 
 Two packages:
 
@@ -11,14 +11,15 @@ Two packages:
 | [`smartrec-lib`](smartrec-lib/) | Train models (ALS, Popular, Random, LightFM), compute metrics, export weights to S3 / Triton |
 | [`smartrec-client`](smartrec-client/) | Lightweight Triton client to fetch recommendations over gRPC / HTTP |
 
-## Where it is used
+## Typical setup
 
-- **`youtravel-recsys/app`** trains models via `smartrec-lib` and writes them to
-  S3; Triton serves from there.
-- **`youtravel-recsys/api`** serves personalized feeds and queries Triton via
+- A **training job** uses `smartrec-lib` to fit models and write them to S3;
+  Triton serves the latest version from there.
+- An **application** fetches personalized recommendations from Triton via
   `smartrec-client`.
 
-It is vendored as a git submodule in both.
+The library is domain-agnostic — plug it into any service. It is usually vendored
+as a git submodule.
 
 ## Quick start
 
@@ -42,7 +43,7 @@ model = RecommenderALS(
         ALS_FACTORS=64, ALS_ITERATIONS=15,
         ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
     ),
-    model_name="als_youtravel",
+    model_name="als_model",
     model_version=datetime.now().strftime("%Y%m%d%H%M%S"),
 )
 model.train(Dataset.construct(interactions))

@@ -1,6 +1,6 @@
 # smartrec-lib
 
-Training and serving toolkit for YouTravel recommendation models. Built on top of
+Training and serving toolkit for recommendation models. Built on top of
 `rectools`, `implicit`, and `lightfm`, with a shared API for training, metrics,
 and exporting models to Triton.
 
@@ -57,7 +57,7 @@ model = RecommenderALS(
         ALS_FACTORS=64, ALS_ITERATIONS=15,
         ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
     ),
-    model_name="als_youtravel",
+    model_name="als_model",
     model_version=datetime.now().strftime("%Y%m%d%H%M%S"),
 )
 model.train(Dataset.construct(interactions))
@@ -69,7 +69,7 @@ recommendations = model.recommend(user_ids=1, top_n=10, filter_viewed=True)
 ```python
 from pathy import Pathy
 
-model.save_model_triton(base_s3_url=Pathy("s3://youtravel-recsys"), num_to_keep=3)
+model.save_model_triton(base_s3_url=Pathy("s3://recsys-models"), num_to_keep=3)
 ```
 
 Set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` (and
