@@ -64,9 +64,8 @@ output [
 
 dynamic_batching {
   default_queue_policy {
-    default_timeout_microseconds: 5000000
+    default_timeout_microseconds: 1000000
   }
 }
 
 instance_group [{ kind: KIND_CPU }]
-name: "model_group"

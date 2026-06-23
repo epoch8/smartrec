@@ -1,6 +1,8 @@
 import json
 import os
+import sys
 import logging
+from time import perf_counter
 
 import numpy as np
 import pandas as pd
@@ -13,13 +15,65 @@ from smartrec_lib.recommenders import (
     RecommenderRandom,
 )
 
-logger = logging.getLogger(__name__)
+# Явно настраиваем логгер на stdout — без этого логи не видны в kubectl logs
+logger = logging.getLogger("triton_model")
+logger.setLevel(logging.DEBUG)
+if not logger.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setLevel(logging.DEBUG)
+    _handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s"))
+    logger.addHandler(_handler)
+
+
+class _TritonLoggingHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+            if record.levelno >= logging.ERROR:
+                pb_utils.Logger.log_error(message)
+            elif record.levelno >= logging.WARNING:
+                if hasattr(pb_utils.Logger, "log_warn"):
+                    pb_utils.Logger.log_warn(message)
+                elif hasattr(pb_utils.Logger, "log_warning"):
+                    pb_utils.Logger.log_warning(message)
+                else:
+                    pb_utils.Logger.log_info(f"[WARN] {message}")
+            else:
+                pb_utils.Logger.log_info(message)
+        except Exception:
+            return
 
 
 class TritonPythonModel:
     """Your Python model must use the same class name. Every Python model
     that is created must have "TritonPythonModel" as the class name.
     """
+
+    @staticmethod
+    def _log_info(message: str) -> None:
+        pb_utils.Logger.log_info(message)
+
+    @staticmethod
+    def _configure_python_logging_bridge() -> None:
+        recommender_logger_names = (
+            "ALS Model",
+            "LightFM Model",
+            "Popular Model",
+            "Random Model",
+            "Base Model",
+            "ALS Model saving stage:",
+        )
+        for logger_name in recommender_logger_names:
+            target_logger = logging.getLogger(logger_name)
+            has_bridge = any(isinstance(handler, _TritonLoggingHandler) for handler in target_logger.handlers)
+            if has_bridge:
+                continue
+            handler = _TritonLoggingHandler()
+            handler.setLevel(logging.INFO)
+            handler.setFormatter(logging.Formatter("%(message)s"))
+            target_logger.addHandler(handler)
+            target_logger.setLevel(logging.INFO)
+            target_logger.propagate = False
 
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
@@ -36,9 +90,15 @@ class TritonPythonModel:
           * model_version: Model version
           * model_name: Model name
         """
+        init_start = perf_counter()
+
+        os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+        os.environ.setdefault("OMP_NUM_THREADS", "1")
+        os.environ.setdefault("MKL_NUM_THREADS", "1")
 
         # You must parse model_config. JSON string is not parsed here
         self.model_config = model_config = json.loads(args["model_config"])
+        self._configure_python_logging_bridge()
 
         # Get item_ids configuration
         item_ids_config = pb_utils.get_output_config_by_name(model_config, "item_ids")
@@ -57,6 +117,7 @@ class TritonPythonModel:
         script_path = os.path.dirname(os.path.abspath(__file__))
 
         # TODO переделать
+        model_load_start = perf_counter()
         if "als" in self.model_config["name"]:
             self.model = RecommenderALS.load_model(load_dir=script_path)
         if "lightfm" in self.model_config["name"]:
@@ -65,6 +126,20 @@ class TritonPythonModel:
             self.model = RecommenderPopular.load_model(load_dir=script_path)
         if "random" in self.model_config["name"]:
             self.model = RecommenderRandom.load_model(load_dir=script_path)
+        model_load_ms = (perf_counter() - model_load_start) * 1000
+
+        cache_warm_ms = 0.0
+        if "als" in self.model_config["name"] and hasattr(self.model, "_ensure_user_item_matrix_binary"):
+            cache_warm_start = perf_counter()
+            self.model._ensure_lookup_caches()
+            self.model._ensure_user_item_matrix_binary()
+            cache_warm_ms = (perf_counter() - cache_warm_start) * 1000
+
+        init_ms = (perf_counter() - init_start) * 1000
+        self._log_info(
+            f"[TRITON MODEL INIT] model={self.model_config['name']} | "
+            f"total={init_ms:.1f}ms, model_load={model_load_ms:.1f}ms, cache_warm={cache_warm_ms:.1f}ms"
+        )
 
     def convert_model_response_to_triton_response(self, model_responses):
         item_ids = pd.DataFrame(model_responses.item_ids)
@@ -101,64 +176,25 @@ class TritonPythonModel:
           A list of pb_utils.InferenceResponse. The length of this list must
           be the same as `requests`
         """
+        execute_start = perf_counter()
         decoder = np.vectorize(lambda x: x.decode("UTF-8"))
+
+        print(f"[TRITON EXECUTE] batch_size={len(requests)}", flush=True)
 
         responses = []
 
         # Every Python backend must iterate over everyone of the requests
         # and create a pb_utils.InferenceResponse for each of them.
         for request in requests:
+            request_start = perf_counter()
 
+            # ----- Парсинг входных данных -----
+            parse_start = perf_counter()
             user_ids = pb_utils.get_input_tensor_by_name(request, "user_ids").as_numpy()[0].decode("utf-8")
             top_n = pb_utils.get_input_tensor_by_name(request, "top_n").as_numpy()[0]
             filter_viewed = pb_utils.get_input_tensor_by_name(request, "filter_viewed").as_numpy()[0]
 
-            # # Check for retrain_mode
-            # retrain_mode_tensor = pb_utils.get_input_tensor_by_name(request, "retrain_mode")
-            # retrain_mode = False
-            # if retrain_mode_tensor is not None:
-            #     retrain_mode = retrain_mode_tensor.as_numpy()[0]
-
-            # # If retrain mode is enabled, process retraining data
-            # if retrain_mode:
-            #     logger.info("Retrain mode enabled - processing retraining request")
-            #     try:
-            #         # Get histories with user interactions
-            #         histories_tensor = pb_utils.get_input_tensor_by_name(request, "histories")
-            #         if histories_tensor is not None:
-            #             histories = decoder(histories_tensor.as_numpy())
-            #             logger.info(f"Received {len(histories)} user histories for retraining")
-
-            #             # Convert to list of tour IDs
-            #             user_tours = []
-            #             for history_str in histories:
-            #                 if history_str:
-            #                     tours = [str(t.strip()) for t in history_str.split(",") if t.strip()]
-            #                     user_tours.extend(tours)
-
-            #             logger.info(f"Total interactions for retraining: {len(user_tours)}")
-
-            #             # Perform model retraining
-            #             await self._perform_model_retraining(user_tours)
-
-            #             # Return success response
-            #             item_ids = pd.DataFrame([["retrain_success"]])
-            #             scores = pd.DataFrame([[1.0]])
-            #             strategy = pd.DataFrame([["retraining_completed"]])
-
-            #             item_ids_tensor = pb_utils.Tensor("item_ids", item_ids.values.astype(self.item_ids_dtype))
-            #             scores_tensor = pb_utils.Tensor("scores", scores.values.astype(self.scores_dtype))
-            #             strategy_tensor = pb_utils.Tensor("strategy", strategy.values.astype(self.strategy_dtype))
-
-            #             inference_response = pb_utils.InferenceResponse(
-            #                 output_tensors=[item_ids_tensor, scores_tensor, strategy_tensor]
-            #             )
-            #             responses.append(inference_response)
-            #             continue
-            #     except Exception as e:
-            #         logger.error(f"Error in retrain mode: {e}", exc_info=True)
-
-            # # Normal inference path
+            # Normal inference path
             item_ids = pb_utils.get_input_tensor_by_name(request, "item_ids")
             if item_ids is not None:
                 item_ids = item_ids.as_numpy()[0].decode("utf-8")
@@ -176,7 +212,10 @@ class TritonPythonModel:
                 history = decoder(history.as_numpy())
             else:
                 history = None
+            parse_ms = (perf_counter() - parse_start) * 1000
 
+            # ----- Вызов модели рекомендаций -----
+            recommend_start = perf_counter()
             recommendations = self.model.recommend(
                 user_ids=user_ids,
                 items_to_recommend=items_to_recommend,
@@ -184,31 +223,41 @@ class TritonPythonModel:
                 filter_viewed=filter_viewed,
                 history=history,
             )
+            recommend_ms = (perf_counter() - recommend_start) * 1000
 
+            # ----- Конвертация ответа в Triton формат -----
+            convert_start = perf_counter()
             inference_response = self.convert_model_response_to_triton_response(recommendations)
+            convert_ms = (perf_counter() - convert_start) * 1000
+
+            request_ms = (perf_counter() - request_start) * 1000
+
+            # ----- Логирование -----
+            history_size = len(history) if history is not None else 0
+            items_count = len(items_to_recommend) if items_to_recommend is not None else 0
+            result_count = len(recommendations.item_ids) if recommendations.item_ids is not None else 0
+
+            log_msg = (
+                f"[TRITON MODEL] user={user_ids}, top_n={top_n}, history={history_size}, items_to_rec={items_count} | "
+                f"total={request_ms:.1f}ms | parse={parse_ms:.1f}ms, recommend={recommend_ms:.1f}ms, convert={convert_ms:.1f}ms | "
+                f"strategy={recommendations.strategy}, results={result_count}"
+            )
+            self._log_info(log_msg)
+            logger.info(log_msg)
+            print(log_msg, flush=True)
 
             responses.append(inference_response)
+
+        # Логирование общего времени batch execute (всегда, даже для 1 запроса)
+        execute_ms = (perf_counter() - execute_start) * 1000
+        execute_log = f"[TRITON MODEL EXECUTE] requests={len(requests)}, total_execute={execute_ms:.1f}ms"
+        self._log_info(execute_log)
+        logger.info(execute_log)
+        print(execute_log, flush=True)
 
         # You should return a list of pb_utils.InferenceResponse. Length
         # of this list must match the length of `requests` list.
         return responses
-
-    # async def _perform_model_retraining(self, tour_ids):
-    #     """
-    #     Perform model retraining on received tour interactions.
-
-    #     This is called when retrain_mode=True in the request.
-    #     """
-    #     try:
-    #         logger.info(f"Starting model retraining with {len(tour_ids)} interactions")
-
-    #         # Note: Full implementation would create a Dataset from tours
-    #         # and call self.model.train_partial(dataset)
-    #         # For now, this is a placeholder that logs the retraining intent
-
-    #         logger.info("Model retraining completed successfully")
-    #     except Exception as e:
-    #         logger.error(f"Failed to perform model retraining: {e}", exc_info=True)
 
     def finalize(self):
         """`finalize` is called only once when the model is being unloaded.
