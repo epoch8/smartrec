@@ -3,10 +3,8 @@ from time import perf_counter
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-import pandas as pd
 from implicit.als import AlternatingLeastSquares
 from pathy import Pathy
-from rectools import Columns
 from rectools.dataset import Dataset
 from rectools.dataset.identifiers import IdMap
 from rectools.metrics import (
@@ -192,92 +190,14 @@ class RecommenderALS(RecommenderModel):
         logger.info("Base models trained.")
 
     def train_partial(self, dataset: Dataset, epochs: Optional[int] = None) -> None:
+        """Incremental (partial) training for ALS.
+
+        UNDER DEVELOPMENT - not available yet. Use train() for full retraining.
         """
-        Perform partial (incremental) training on new data.
-        Updates the existing model with new interactions without full retraining.
-
-        IMPORTANT: This method only supports incremental training on EXISTING users and items.
-        If you have new users or items, you must use train() for full retraining.
-
-        Parameters:
-            dataset: New dataset with additional interactions to train on.
-                     Must contain ONLY existing users and items.
-            epochs: Number of epochs for partial training. If None, uses ALS_ITERATIONS from config.
-
-        Raises:
-            ValueError: If dataset contains new users or items not seen during training.
-        """
-        assert self.recsys_config is not None
-        assert self.model_hot_users is not None, "Model must be trained before train_partial. Call train() first."
-
-        logger.info("Performing partial fit...")
-        logger.info(f"New interactions: {len(dataset.interactions.df)}")
-
-        # Check if there are new users or items BEFORE merging
-        new_users = set(dataset.user_id_map.external_ids) - set(self.user_id_map.external_ids)
-        new_items = set(dataset.item_id_map.external_ids) - set(self.item_id_map.external_ids)
-
-        if new_users or new_items:
-            # Reject new users/items - train_partial only for incremental updates
-            error_msg = (
-                f"train_partial() cannot add new entities. "
-                f"Found {len(new_users)} new users and {len(new_items)} new items. "
-                f"Use train() for full retraining with new users/items."
-            )
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-
-        # Use config iterations if epochs not specified
-        if epochs is None:
-            epochs = self.recsys_config.ALS_ITERATIONS
-
-        # Merge old dataset with new interactions to preserve all data
-        if self.dataset is not None:
-            logger.info(
-                f"Merging old dataset ({len(self.dataset.interactions.df)} interactions) "
-                f"with new data ({len(dataset.interactions.df)} interactions)"
-            )
-
-            # Combine old and new interactions
-            old_df = self.dataset.interactions.df.copy()
-            new_df = dataset.interactions.df.copy()
-
-            # Concatenate and remove duplicates (keep most recent)
-            combined_df = pd.concat([old_df, new_df], ignore_index=True)
-            combined_df = combined_df.drop_duplicates(subset=[Columns.User, Columns.Item], keep="last")
-
-            # Create combined dataset - it will have id_maps for all users/items in interactions
-            combined_dataset = Dataset.construct(interactions_df=combined_df)
-            logger.info(f"Combined dataset: {len(combined_dataset.interactions.df)} total interactions")
-            logger.info(
-                f"Dataset has {len(combined_dataset.user_id_map.external_ids)} users, "
-                f"{len(combined_dataset.item_id_map.external_ids)} items"
-            )
-        else:
-            combined_dataset = dataset
-            logger.info("No existing dataset, using new data only")
-
-        logger.info(
-            f"Performing partial fit with {epochs} epochs "
-            f"on combined dataset ({len(combined_dataset.interactions.df)} interactions)."
+        raise NotImplementedError(
+            "train_partial for ALS is under development and not available yet. "
+            "Use train() for full retraining."
         )
-
-        # fit_partial will now have factors for ALL users/items (including placeholders)
-        self.model_hot_users.fit_partial(combined_dataset, epochs=epochs)
-
-        # Update dataset and id_maps to combined version (which includes ALL users/items)
-        self.dataset = combined_dataset
-        self.user_id_map = combined_dataset.user_id_map
-        self.item_id_map = combined_dataset.item_id_map
-
-        # Recompute item similarity matrix with updated factors
-        self.item_similarity = self.compute_item_similarity(self.model_hot_users)
-
-        # Update hot user and item sets
-        self.user_ids_hot = set(self.user_id_map.convert_to_external(self.dataset.interactions.df.user_id))
-        self.item_ids_hot = set(self.item_id_map.convert_to_external(self.dataset.interactions.df.item_id))
-
-        logger.info("Partial fit completed successfully.")
 
     def recommend(
         self,
