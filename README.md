@@ -23,6 +23,8 @@ It is vendored as a git submodule in both.
 ## Quick start
 
 ```python
+from datetime import datetime
+
 import pandas as pd
 from rectools.dataset import Dataset
 from smartrec_lib.model import ALSSettings
@@ -41,7 +43,7 @@ model = RecommenderALS(
         ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
     ),
     model_name="als_youtravel",
-    model_version="20241024",
+    model_version=datetime.now().strftime("%Y%m%d%H%M%S"),
 )
 model.train(Dataset.construct(interactions))
 recs = model.recommend(user_ids=1, top_n=10, filter_viewed=True)
