@@ -183,22 +183,21 @@ def clean_old_model_versions(base_s3_url: Pathy, model_name: str, num_to_keep: i
     # List all items (files and directories) in the folder
     all_items = fs.ls(str(s3_url), detail=True)
 
-    # Filter to get only directories
-    all_folders = [item["name"] for item in all_items if item["type"] == "directory"]
+    # Filter to get only directories with numeric names (model versions)
+    all_folders = []
+    for item in all_items:
+        if item["type"] == "directory":
+            folder_name = Path(item["name"]).name
+            # Only include directories with numeric names (model versions)
+            if folder_name.isdigit():
+                all_folders.append(item["name"])
 
-    # Filter only numeric version folders (skip runtime_envs, etc.)
-    numeric_folders = []
-    for folder in all_folders:
-        folder_name = Path(folder).name
-        if folder_name.isdigit():
-            numeric_folders.append(folder)
-
-    if not numeric_folders:
+    if not all_folders:
         logger.info("No versions found to clean")
         return
 
-    # Sort the folders by version (assumed to be numeric)
-    sorted_folders = sorted(numeric_folders, key=lambda x: int(Path(x).name), reverse=True)
+    # Sort the folders by version (numeric)
+    sorted_folders = sorted(all_folders, key=lambda x: int(Path(x).name), reverse=True)
 
     # Delete the older versions, keeping only the latest 'num_to_keep' versions
     folders_to_delete = sorted_folders[num_to_keep:]
