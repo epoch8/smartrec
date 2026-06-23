@@ -17,6 +17,20 @@ and exporting models to Triton.
 - **`save_and_load_triton_models`** — upload/download weights to S3 and prepare
   the Triton layout (`config.pbtxt`, `model.py`, old-version cleanup).
 
+## How recommendations work
+
+`recommend()` returns items plus a `strategy` (see `Strategy` in `model.py`) that
+says how they were produced:
+
+- **hot** users (seen during training) → personalized ALS embeddings;
+- **cold** users (unknown) → popular-items fallback; **warm** users sit in between;
+- passing a real-time `history` of recent item IDs enriches the result on the fly
+  (`*_realtime_*` strategies) without retraining.
+
+In production the model runs inside Triton via the Python backend in
+`smartrec_lib/serving/` (`model.py` + `config.pbtxt`), which loads the exported
+`model.pkl`.
+
 > **Note:** `RecommenderALS.train_partial` (incremental fit) is **under
 > development** and currently raises `NotImplementedError`. Use `train()` for
 > full retraining.
