@@ -768,7 +768,9 @@ class RecommenderALS(RecommenderModel):
 
         return None
 
-    def calc_metrics(self, k: int, dataset: Dataset) -> Dict[str, Any]:
+    def calc_metrics(
+        self, k: int, dataset: Dataset, n_splits: int = 3
+    ) -> Dict[str, Any]:
         assert self.recsys_config is not None
 
         metrics = {
@@ -796,8 +798,6 @@ class RecommenderALS(RecommenderModel):
                 period=self.recsys_config.POPULARITY_PERIOD,
             ),
         }
-
-        n_splits = 3
 
         splitter = TimeRangeSplitter(
             test_size="4D",
