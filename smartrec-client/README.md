@@ -25,7 +25,7 @@ from smartrec_client import recommendations_triton
 
 result = recommendations_triton(
     triton_server_url="grpc://localhost:8001",
-    model_name="als_youtravel",
+    model_name="als_model",
     user_ids="12345",
     top_n=10,
     filter_viewed=True,
