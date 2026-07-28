@@ -47,6 +47,18 @@ class CoVisSettings(CommonRecommenderSettings):
     COVIS_MIN_COOC: int = 2  # minimum co-occurrence count to keep an edge
 
 
+class OrchestratorSettings(CommonRecommenderSettings):
+    # Composes the sub-model configs plus segment/global popularity knobs.
+    # One config drives building every component of the orchestrator.
+    ease: EASESettings = EASESettings()
+    covis: CoVisSettings = CoVisSettings()
+    POPULARITY_STRATEGY: Literal["n_users", "n_interactions", "mean_weight", "sum_weight"] = "n_users"
+    POPULARITY_PERIOD: Optional[timedelta] = timedelta(days=7)
+    # Item-metadata dimensions for cold segment popularity, most specific first.
+    SEGMENT_DIMS: List[str] = ["country", "region", "type"]
+    SEGMENT_TOP_N: int = 200
+
+
 class RandomSettings(CommonRecommenderSettings):
     pass
 

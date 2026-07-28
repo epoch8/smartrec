@@ -7,3 +7,4 @@ from smartrec_lib.recommenders.recommender_covis import RecommenderCoVis
 from smartrec_lib.recommenders.recommender_lightfm import RecommenderLightFM
 from smartrec_lib.recommenders.recommender_popular import RecommenderPopular
 from smartrec_lib.recommenders.recommender_random import RecommenderRandom
+from smartrec_lib.recommenders.recommender_orchestrator import RecommenderOrchestrator
