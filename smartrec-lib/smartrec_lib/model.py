@@ -33,6 +33,13 @@ class LighFMSettings(CommonRecommenderSettings):
     LIGHTFM_EPOCHS: int = 1
 
 
+class EASESettings(CommonRecommenderSettings):
+    # Regularization for the closed-form item-item EASE model.
+    # 250 was the best value in offline k-fold sweeps (30-day training window).
+    # Warm ranker only: cold-user routing is handled by the orchestrator layer.
+    EASE_REGULARIZATION: float = 250.0
+
+
 class RandomSettings(CommonRecommenderSettings):
     pass
 
