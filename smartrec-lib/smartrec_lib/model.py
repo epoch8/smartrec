@@ -40,6 +40,13 @@ class EASESettings(CommonRecommenderSettings):
     EASE_REGULARIZATION: float = 250.0
 
 
+class CoVisSettings(CommonRecommenderSettings):
+    # Item-item co-visitation from user baskets. Session-based ranker: scores
+    # candidates by co-occurrence with the items in the user's real-time history.
+    COVIS_TOP_K: int = 100  # neighbors kept per item
+    COVIS_MIN_COOC: int = 2  # minimum co-occurrence count to keep an edge
+
+
 class RandomSettings(CommonRecommenderSettings):
     pass
 
