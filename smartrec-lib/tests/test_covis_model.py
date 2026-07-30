@@ -1,5 +1,6 @@
 import pandas as pd
 from rectools import Columns
+from rectools.dataset import Dataset
 from rectools.models import model_from_config
 from smartrec_lib.models import CoVisModel
 
@@ -50,6 +51,7 @@ def test_recommend_respects_whitelist(dataset):
     reco = model.recommend(
         users=["u1"], dataset=dataset, k=5, filter_viewed=True, items_to_recommend=["m3", "t1"]
     )
+    assert "m3" in reco[Columns.Item].tolist()  # non-vacuous: whitelist actually admitted something
     assert set(reco[Columns.Item]) <= {"m3", "t1"}
 
 
@@ -80,12 +82,34 @@ def test_online_offline_parity(dataset):
     assert offline[Columns.Item].tolist() == [item for item, _ in online]
 
 
+def test_fit_basket_size_caps_basket_to_most_recent_interactions():
+    # u1: "old" is the earliest event, then two more recent ones. With
+    # fit_basket_size=2 the basket for _fit is capped to the 2 most recent
+    # items, so "old" never enters any basket and therefore has no neighbors.
+    rows = [("u1", "old", 1), ("u1", "recent_a", 2), ("u1", "recent_b", 3)]
+    df = pd.DataFrame(rows, columns=[Columns.User, Columns.Item, "day"])
+    df[Columns.Weight] = 1.0
+    df[Columns.Datetime] = df["day"].map(lambda d: pd.Timestamp("2026-07-01") + pd.Timedelta(days=int(d)))
+    df = df[[Columns.User, Columns.Item, Columns.Weight, Columns.Datetime]]
+    small_dataset = Dataset.construct(interactions_df=df)
+
+    model = CoVisModel(min_cooc=1, top_k=100, fit_basket_size=2)
+    model.fit(small_dataset)
+
+    old_internal = _internal(small_dataset, "old")
+    recent_a_internal = _internal(small_dataset, "recent_a")
+    recent_b_internal = _internal(small_dataset, "recent_b")
+
+    assert old_internal not in model.neighbors  # dropped from the basket entirely
+    assert recent_b_internal in dict(model.neighbors[recent_a_internal])
+
+
 def test_config_roundtrip(dataset):
-    model = CoVisModel(top_k=7, min_cooc=3, session_size=5)
+    model = CoVisModel(top_k=7, min_cooc=3, session_size=5, fit_basket_size=42)
     config = model.get_config()
     restored = model_from_config(config)
     assert isinstance(restored, CoVisModel)
-    assert (restored.top_k, restored.min_cooc, restored.session_size) == (7, 3, 5)
+    assert (restored.top_k, restored.min_cooc, restored.session_size, restored.fit_basket_size) == (7, 3, 5, 42)
 
 
 def test_config_serializes_to_plain_dict():

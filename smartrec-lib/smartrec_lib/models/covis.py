@@ -11,9 +11,10 @@ from rectools.models.base import ModelBase, ModelConfig
 class CoVisModelConfig(ModelConfig):
     """Config for the session co-visitation model."""
 
-    top_k: int = 100        # neighbors kept per item
-    min_cooc: int = 2       # minimum co-occurrence count to keep an edge
-    session_size: int = 20  # max most-recent history items used as the session seed
+    top_k: int = 100             # neighbors kept per item
+    min_cooc: int = 2            # minimum co-occurrence count to keep an edge
+    session_size: int = 20       # max most-recent history items used as the session seed
+    fit_basket_size: int = 100   # max most-recent train interactions per user used to build baskets in _fit
 
 
 class CoVisModel(ModelBase[CoVisModelConfig]):
@@ -33,11 +34,19 @@ class CoVisModel(ModelBase[CoVisModelConfig]):
     recommends_for_cold = False
     config_class = CoVisModelConfig
 
-    def __init__(self, top_k: int = 100, min_cooc: int = 2, session_size: int = 20, verbose: int = 0) -> None:
+    def __init__(
+        self,
+        top_k: int = 100,
+        min_cooc: int = 2,
+        session_size: int = 20,
+        fit_basket_size: int = 100,
+        verbose: int = 0,
+    ) -> None:
         super().__init__(verbose=verbose)
         self.top_k = top_k
         self.min_cooc = min_cooc
         self.session_size = session_size
+        self.fit_basket_size = fit_basket_size
         self.neighbors: tp.Dict[int, tp.List[tp.Tuple[int, float]]] = {}
 
     def _get_config(self) -> CoVisModelConfig:
@@ -46,6 +55,7 @@ class CoVisModel(ModelBase[CoVisModelConfig]):
             top_k=self.top_k,
             min_cooc=self.min_cooc,
             session_size=self.session_size,
+            fit_basket_size=self.fit_basket_size,
             verbose=self.verbose,
         )
 
@@ -55,11 +65,20 @@ class CoVisModel(ModelBase[CoVisModelConfig]):
             top_k=config.top_k,
             min_cooc=config.min_cooc,
             session_size=config.session_size,
+            fit_basket_size=config.fit_basket_size,
             verbose=config.verbose,
         )
 
     def _fit(self, dataset: Dataset) -> None:
         df = dataset.interactions.df  # internal ids
+        # Cap each user's basket to their most recent `fit_basket_size`
+        # interactions before building co-occurrence pairs: a basket of size N
+        # produces C(N, 2) pairs, so bot/power users with thousands of
+        # interactions would otherwise blow up _fit's runtime and memory.
+        if len(df) > 0:
+            df = df.sort_values(Columns.Datetime, ascending=False).groupby(Columns.User, sort=False).head(
+                self.fit_basket_size
+            )
         baskets: tp.Dict[int, tp.Set[int]] = defaultdict(set)
         for user, item in zip(df[Columns.User].values, df[Columns.Item].values):
             baskets[int(user)].add(int(item))
