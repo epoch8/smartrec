@@ -30,6 +30,14 @@ jobs:
     - name: Move uv.lock to smartrec-lib
       run: |
         cp uv.lock ./smartrec-lib/
+    - name: Rebuild lightfm for this runner's CPU
+      run: |
+        # rectools-lightfm ships no Linux wheel; its sdist compiles with
+        # -march=native. A wheel built on one runner and restored from the
+        # shared uv cache can hit SIGILL (illegal instruction) on a runner
+        # with a different CPU. Drop it from the cache so it is rebuilt
+        # for the CPU actually running this job.
+        uv cache clean rectools-lightfm || true
     - name: Install libs
       working-directory: ./smartrec-lib
       run: |
