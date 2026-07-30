@@ -26,6 +26,18 @@ def evaluate_e2e(
     the next-item protocol.
 
     Models are given as configs (data, not code) and re-fitted on every fold.
+
+    The fold train dataset is built via `dataset.filter_interactions(...)`
+    (the same call `cross_validate` uses), NOT `Dataset.construct` from an
+    external-id frame - `Dataset.construct` would drop item/user features,
+    which silently disables any policy behaviour that depends on them (e.g.
+    PolicyModel's category share cap).
+
+    Caveat: the "cold" segment (and, by extension, "all") only appears in
+    folds that actually contain cold test users, so it can be averaged over
+    fewer folds than "hot". The `n_folds` column (how many folds contributed
+    to a (model, segment) average) makes this visible; `n_users` itself is
+    also a per-fold mean, not a total across folds.
     """
     splitter = TimeRangeSplitter(
         test_size=test_size,
@@ -43,10 +55,18 @@ def evaluate_e2e(
     }
     rows: tp.List[tp.Dict[str, tp.Any]] = []
     for train_ids, test_ids, _info in splitter.split(dataset.interactions):
+        # Only used for the external test frame and the external train-user
+        # set needed for hot/cold segmentation - NOT for building the fold
+        # train dataset (that must go through filter_interactions to keep
+        # item/user features, see the docstring above).
         train_ext, test_ext = _fold_frames(dataset, train_ids, test_ids)
         if train_ext.empty or test_ext.empty:
             continue
-        fold_dataset = Dataset.construct(interactions_df=train_ext)
+        fold_dataset = dataset.filter_interactions(
+            row_indexes_to_keep=train_ids,
+            keep_external_ids=True,
+            keep_features_for_removed_entities=True,
+        )
         train_users = set(train_ext[Columns.User])
         test_users = test_ext[Columns.User].unique().tolist()
         segments = {
@@ -73,4 +93,7 @@ def evaluate_e2e(
                 seg_metrics.update({"model": name, "segment": segment, "n_users": len(users)})
                 rows.append(seg_metrics)
     df = pd.DataFrame(rows)
-    return df.groupby(["model", "segment"]).mean(numeric_only=True)
+    grouped = df.groupby(["model", "segment"])
+    result = grouped.mean(numeric_only=True)
+    result["n_folds"] = grouped.size()
+    return result
