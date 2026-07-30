@@ -78,3 +78,55 @@ class CoVisModel(ModelBase[CoVisModelConfig]):
             kept.sort(key=lambda pair: (-pair[1], pair[0]))  # deterministic: count desc, id asc
             if kept:
                 self.neighbors[item] = kept[: self.top_k]
+
+    def _score_session(
+        self,
+        session: tp.Sequence[int],
+        exclude: tp.AbstractSet[int],
+        allowed: tp.Optional[tp.AbstractSet[int]],
+        k: int,
+    ) -> tp.List[tp.Tuple[int, float]]:
+        """Recency-weighted neighbor scores for a most-recent-first session (internal ids)."""
+        seed = list(session)[: self.session_size]
+        if not seed:
+            return []
+        scores: tp.Dict[int, float] = defaultdict(float)
+        n = len(seed)
+        for pos, item in enumerate(seed):
+            recency = (n - pos) / n
+            for neighbor, weight in self.neighbors.get(item, []):
+                if neighbor in exclude:
+                    continue
+                if allowed is not None and neighbor not in allowed:
+                    continue
+                scores[neighbor] += weight * recency
+        ranked = sorted(scores.items(), key=lambda pair: (-pair[1], pair[0]))
+        return ranked[:k]
+
+    def _recommend_u2i(
+        self,
+        user_ids,  # InternalIdsArray
+        dataset: Dataset,
+        k: int,
+        filter_viewed: bool,
+        sorted_item_ids_to_recommend,  # Optional[InternalIdsArray]
+    ) -> tp.Tuple[tp.List[int], tp.List[int], tp.List[float]]:
+        df = dataset.interactions.df
+        wanted = {int(u) for u in user_ids}
+        hist = df[df[Columns.User].isin(wanted)].sort_values(Columns.Datetime, ascending=False)
+        sessions = hist.groupby(Columns.User, sort=False)[Columns.Item].agg(list).to_dict()
+        allowed = {int(i) for i in sorted_item_ids_to_recommend} if sorted_item_ids_to_recommend is not None else None
+
+        all_users: tp.List[int] = []
+        all_items: tp.List[int] = []
+        all_scores: tp.List[float] = []
+        for user in user_ids:
+            session = [int(i) for i in sessions.get(int(user), [])]
+            # filter_viewed must exclude EVERYTHING the user saw, not only the
+            # (possibly truncated) session seed.
+            exclude = set(session) if filter_viewed else set()
+            for item, score in self._score_session(session, exclude, allowed, k):
+                all_users.append(int(user))
+                all_items.append(item)
+                all_scores.append(score)
+        return all_users, all_items, all_scores
