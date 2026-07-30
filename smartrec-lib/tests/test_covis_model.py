@@ -48,9 +48,7 @@ def test_recommend_scores_by_cooccurrence(dataset):
 def test_recommend_respects_whitelist(dataset):
     model = CoVisModel(min_cooc=1, top_k=100)
     model.fit(dataset)
-    reco = model.recommend(
-        users=["u1"], dataset=dataset, k=5, filter_viewed=True, items_to_recommend=["m3", "t1"]
-    )
+    reco = model.recommend(users=["u1"], dataset=dataset, k=5, filter_viewed=True, items_to_recommend=["m3", "t1"])
     assert "m3" in reco[Columns.Item].tolist()  # non-vacuous: whitelist actually admitted something
     assert set(reco[Columns.Item]) <= {"m3", "t1"}
 

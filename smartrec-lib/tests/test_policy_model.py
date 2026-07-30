@@ -6,8 +6,12 @@ from smartrec_lib.models import CoVisModel
 from smartrec_lib.policy import PolicyModel
 
 ITEM_COUNTRY_LOCAL = {
-    "m1": "maldives", "m2": "maldives", "m3": "maldives",
-    "t1": "turkey", "t2": "turkey", "t3": "turkey",
+    "m1": "maldives",
+    "m2": "maldives",
+    "m3": "maldives",
+    "t1": "turkey",
+    "t2": "turkey",
+    "t3": "turkey",
     "pop1": "france",
 }
 
@@ -71,8 +75,8 @@ def test_hot_user_fusion_includes_covis_signal(dataset):
     policy.fit(dataset)
     reco = policy.recommend(users=["u1"], dataset=dataset, k=3, filter_viewed=True)
     items = reco[Columns.Item].tolist()
-    assert "m3" in items          # covis: strong maldives co-occurrence for u1
-    assert "m1" not in items      # filter_viewed honoured through sources
+    assert "m3" in items  # covis: strong maldives co-occurrence for u1
+    assert "m1" not in items  # filter_viewed honoured through sources
 
 
 def test_session_weight_zero_turns_covis_off(dataset):

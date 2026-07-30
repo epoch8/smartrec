@@ -14,6 +14,7 @@ SessionScorer = tp.Callable[[tp.Sequence[tp.Any], int], tp.List[tp.Any]]
 
 def _fold_frames(dataset: Dataset, train_ids, test_ids) -> tp.Tuple[pd.DataFrame, pd.DataFrame]:
     """Slice interactions by iloc indices and convert back to external ids."""
+
     def to_external(part: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(
             {

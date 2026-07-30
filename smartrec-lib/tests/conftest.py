@@ -10,18 +10,36 @@ BASE = pd.Timestamp("2026-07-01")
 #   (t1,t2)=2  (t2,t3)=2  (t1,t3)=1  (t2,pop1)=3  (t1,pop1)=2  (t3,pop1)=2
 # pop1 is the most popular item overall (6 users).
 _ROWS = [
-    ("u1", "m1", 1), ("u1", "m2", 2), ("u1", "pop1", 3),
-    ("u2", "m1", 1), ("u2", "m2", 2), ("u2", "m3", 3), ("u2", "pop1", 4),
-    ("u3", "m2", 2), ("u3", "m3", 3), ("u3", "pop1", 5),
-    ("u4", "t1", 1), ("u4", "t2", 2), ("u4", "pop1", 6),
-    ("u5", "t1", 2), ("u5", "t2", 3), ("u5", "t3", 4), ("u5", "pop1", 7),
-    ("u6", "t2", 3), ("u6", "t3", 4), ("u6", "pop1", 8),
+    ("u1", "m1", 1),
+    ("u1", "m2", 2),
+    ("u1", "pop1", 3),
+    ("u2", "m1", 1),
+    ("u2", "m2", 2),
+    ("u2", "m3", 3),
+    ("u2", "pop1", 4),
+    ("u3", "m2", 2),
+    ("u3", "m3", 3),
+    ("u3", "pop1", 5),
+    ("u4", "t1", 1),
+    ("u4", "t2", 2),
+    ("u4", "pop1", 6),
+    ("u5", "t1", 2),
+    ("u5", "t2", 3),
+    ("u5", "t3", 4),
+    ("u5", "pop1", 7),
+    ("u6", "t2", 3),
+    ("u6", "t3", 4),
+    ("u6", "pop1", 8),
     ("u7", "t1", 8),  # cold-ish: single event on the last day (e2e cold segment)
 ]
 
 ITEM_COUNTRY = {
-    "m1": "maldives", "m2": "maldives", "m3": "maldives",
-    "t1": "turkey", "t2": "turkey", "t3": "turkey",
+    "m1": "maldives",
+    "m2": "maldives",
+    "m3": "maldives",
+    "t1": "turkey",
+    "t2": "turkey",
+    "t3": "turkey",
     "pop1": "france",
 }
 

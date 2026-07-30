@@ -42,8 +42,7 @@ class PolicyModel(ModelBase[PolicyModelConfig]):
     ) -> None:
         super().__init__(verbose=verbose)
         self.source_specs: tp.Dict[str, SourceSpec] = {
-            name: spec if isinstance(spec, SourceSpec) else SourceSpec(**spec)
-            for name, spec in (sources or {}).items()
+            name: spec if isinstance(spec, SourceSpec) else SourceSpec(**spec) for name, spec in (sources or {}).items()
         }
         self.fallback_source = fallback_source
         self.rrf_k = rrf_k
