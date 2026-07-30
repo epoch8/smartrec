@@ -100,3 +100,108 @@ class PolicyModel(ModelBase[PolicyModelConfig]):
             for external in externals:
                 result[external] = str(name[1])
         return result
+
+    def _source_weight(self, name: str, n_session_events: int) -> float:
+        spec = self.source_specs[name]
+        weight = spec.weight
+        if spec.is_session:
+            weight *= session_weight(n_session_events, self.session_weight_tiers)
+        return weight
+
+    def _recommend_u2i(
+        self,
+        user_ids,  # InternalIdsArray (hot users)
+        dataset: Dataset,
+        k: int,
+        filter_viewed: bool,
+        sorted_item_ids_to_recommend,  # Optional[InternalIdsArray]
+    ) -> tp.Tuple[tp.List[int], tp.List[int], tp.List[float]]:
+        external_users = list(dataset.user_id_map.convert_to_external(user_ids))
+        items_whitelist = None
+        if sorted_item_ids_to_recommend is not None:
+            items_whitelist = list(dataset.item_id_map.convert_to_external(sorted_item_ids_to_recommend))
+        n_fetch = k * self.overfetch
+
+        per_source: tp.Dict[str, tp.Dict[tp.Any, tp.List[tp.Any]]] = {}
+        for name, model in self.models.items():
+            reco = model.recommend(
+                users=external_users,
+                dataset=dataset,
+                k=n_fetch,
+                filter_viewed=filter_viewed,
+                items_to_recommend=items_whitelist,
+                on_unsupported_targets="ignore",
+            )
+            per_source[name] = reco.groupby(Columns.User, sort=False)[Columns.Item].agg(list).to_dict()
+
+        # session length per internal user id (train interactions count)
+        session_len = dataset.interactions.df[Columns.User].value_counts().to_dict()
+
+        out_users: tp.List[int] = []
+        out_items: tp.List[int] = []
+        out_scores: tp.List[float] = []
+        for internal_user, external_user in zip(user_ids, external_users):
+            n_events = int(session_len.get(int(internal_user), 0))
+            rankings: tp.Dict[str, tp.List[tp.Any]] = {}
+            weights: tp.Dict[str, float] = {}
+            for name in self.models:
+                items = per_source[name].get(external_user, [])
+                weight = self._source_weight(name, n_events)
+                if items and weight > 0:
+                    rankings[name] = items
+                    weights[name] = weight
+            fused_items = [item for item, _ in rrf_fuse(rankings, weights, self.rrf_k)]
+            if self.category_share_cap < 1.0 and self.item_category:
+                fused_items = apply_share_cap(fused_items, self.item_category, k, self.category_share_cap)
+            top = fused_items[:k]
+            internal_items = dataset.item_id_map.convert_to_internal(top)
+            for rank, internal_item in enumerate(internal_items, start=1):
+                out_users.append(int(internal_user))
+                out_items.append(int(internal_item))
+                out_scores.append(1.0 / rank)  # post-cap order is the truth; scores follow rank
+        return out_users, out_items, out_scores
+
+    def _fallback_recommend(self, external_users: tp.List[tp.Any], dataset: Dataset, k: int, items_whitelist):
+        fallback = self.models[self.fallback_source]
+        return fallback.recommend(
+            users=external_users,
+            dataset=dataset,
+            k=k,
+            filter_viewed=False,  # cold users have nothing viewed in train
+            items_to_recommend=items_whitelist,
+            on_unsupported_targets="ignore",
+        )
+
+    def _recommend_cold(
+        self,
+        target_ids,  # ExternalIdsArray (users not in the id map)
+        dataset: Dataset,
+        k: int,
+        sorted_item_ids_to_recommend,
+    ) -> tp.Tuple[tp.List[tp.Any], tp.List[int], tp.List[float]]:
+        items_whitelist = None
+        if sorted_item_ids_to_recommend is not None:
+            items_whitelist = list(dataset.item_id_map.convert_to_external(sorted_item_ids_to_recommend))
+        reco = self._fallback_recommend(list(target_ids), dataset, k, items_whitelist)
+        internal_items = dataset.item_id_map.convert_to_internal(reco[Columns.Item])
+        return reco[Columns.User].tolist(), [int(i) for i in internal_items], reco[Columns.Score].tolist()
+
+    def _recommend_u2i_warm(
+        self,
+        user_ids,  # InternalIdsArray (known users without interactions)
+        dataset: Dataset,
+        k: int,
+        sorted_item_ids_to_recommend,
+    ) -> tp.Tuple[tp.List[int], tp.List[int], tp.List[float]]:
+        external_users = list(dataset.user_id_map.convert_to_external(user_ids))
+        items_whitelist = None
+        if sorted_item_ids_to_recommend is not None:
+            items_whitelist = list(dataset.item_id_map.convert_to_external(sorted_item_ids_to_recommend))
+        reco = self._fallback_recommend(external_users, dataset, k, items_whitelist)
+        internal_users = dataset.user_id_map.convert_to_internal(reco[Columns.User])
+        internal_items = dataset.item_id_map.convert_to_internal(reco[Columns.Item])
+        return (
+            [int(u) for u in internal_users],
+            [int(i) for i in internal_items],
+            reco[Columns.Score].tolist(),
+        )
