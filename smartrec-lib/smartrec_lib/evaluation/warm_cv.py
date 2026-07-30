@@ -67,6 +67,8 @@ def evaluate_warm_cv(
         metrics=default_metrics(k),
         k=k,
         filter_viewed=True,
+        ref_models=[ref_model] if ref_model else None,
+        validate_ref_models=bool(ref_model),
     )
     df = pd.DataFrame(result["metrics"])
     value_columns = [c for c in df.columns if c not in ("model", "i_split")]
