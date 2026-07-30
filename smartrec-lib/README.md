@@ -59,6 +59,31 @@ cd app/smartrec/smartrec-lib
 uv run pytest tests
 ```
 
+## Development: lint and format
+
+All code must pass the repo's formatters and linters BEFORE committing.
+CI (`.github/workflows/smartrec-lib-test.yaml`) hard-fails on flake8
+`E9,F63,F7,F82`; black config lives in `pyproject.toml` (line-length 120).
+
+```bash
+cd app/smartrec
+
+# format (black, line-length 120 from pyproject.toml)
+uv run black smartrec-lib/smartrec_lib smartrec-lib/tests
+
+# lint - hard gate (CI fails on these)
+uv run flake8 smartrec-lib --count --select=E9,F63,F7,F82 --show-source --ignore=F821
+
+# lint - broad pass (keep it clean on new code)
+uv run flake8 smartrec-lib --ignore=C901,F821 --count --max-complexity=10 --max-line-length=127
+
+# tests
+uv run pytest smartrec-lib/tests
+```
+
+Conventions: keep style-only changes in separate commits from logic changes;
+new code must come in already formatted (no follow-up "apply black" commits).
+
 ## v2 core (rectools-native)
 
 New-generation components live next to the legacy `recommenders/` package and
