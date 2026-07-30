@@ -130,3 +130,21 @@ class CoVisModel(ModelBase[CoVisModelConfig]):
                 all_items.append(item)
                 all_scores.append(score)
         return all_users, all_items, all_scores
+
+    def recommend_for_session(
+        self,
+        session: tp.Sequence[tp.Any],
+        dataset: Dataset,
+        k: int,
+        filter_viewed: bool = True,
+    ) -> tp.List[tp.Tuple[tp.Any, float]]:
+        """
+        Online-path scoring: explicit most-recent-first session of EXTERNAL item
+        ids (e.g. from Redis / the request). Unknown items are skipped. Shares
+        `_score_session` with the offline u2i path (parity guarantee).
+        """
+        internal = [int(i) for i in dataset.item_id_map.convert_to_internal(session, strict=False)]
+        exclude = set(internal) if filter_viewed else set()
+        ranked = self._score_session(internal, exclude, None, k)
+        externals = dataset.item_id_map.convert_to_external([item for item, _ in ranked])
+        return [(ext, score) for ext, (_, score) in zip(externals, ranked)]
