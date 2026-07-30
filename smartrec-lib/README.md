@@ -58,3 +58,25 @@ model.save_model_triton(
 cd app/smartrec/smartrec-lib
 uv run pytest tests
 ```
+
+## v2 core (rectools-native)
+
+New-generation components live next to the legacy `recommenders/` package and
+follow the rectools `ModelBase` contract, so configs, save/load and
+`cross_validate` come from the framework:
+
+- `smartrec_lib.models` - custom models missing from rectools. `CoVisModel`:
+  session co-visitation; the online path (`recommend_for_session`) and the
+  offline u2i path share one scoring routine (offline == online parity).
+- `smartrec_lib.policy` - the serving policy as a regular rectools model:
+  candidate sources (any rectools model config) -> weighted Reciprocal Rank
+  Fusion -> category share cap; cold users fall back to the popularity source.
+  Session source weight scales with session strength (one click is weak
+  evidence - it must not turn the feed into a mono-category page).
+- `smartrec_lib.evaluation` - three offline protocols: `evaluate_warm_cv`
+  (accuracy + beyond-accuracy preset, ref model support), `evaluate_next_item`
+  (session replay with `served_frac`), `evaluate_e2e` (whole system with cold
+  users kept, hot/cold segments).
+
+Legacy `recommenders/` stay untouched and keep serving production; migration is
+tracked in the parent repo (`app/docs/SMARTREC_V2_RESEARCH.md`).
