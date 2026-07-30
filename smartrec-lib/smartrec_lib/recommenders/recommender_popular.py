@@ -122,9 +122,7 @@ class RecommenderPopular(RecommenderModel):
 
         return None
 
-    def calc_metrics(
-        self, k: int, dataset: Dataset, n_splits: int = 3
-    ) -> Dict[str, Any]:
+    def calc_metrics(self, k: int, dataset: Dataset, n_splits: int = 3) -> Dict[str, Any]:
         assert self.recsys_config is not None
 
         metrics = {

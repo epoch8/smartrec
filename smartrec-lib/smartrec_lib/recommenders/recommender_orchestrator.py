@@ -101,11 +101,7 @@ class RecommenderOrchestrator(RecommenderModel):
         df = dataset.interactions.df
         items_ext = [str(i) for i in dataset.item_id_map.convert_to_external(df[Columns.Item].values)]
         users_ext = [str(u) for u in dataset.user_id_map.convert_to_external(df[Columns.User].values)]
-        pop = (
-            pd.DataFrame({"item": items_ext, "user": users_ext})
-            .groupby("item")["user"]
-            .nunique()
-        )
+        pop = pd.DataFrame({"item": items_ext, "user": users_ext}).groupby("item")["user"].nunique()
         pop_map = pop.to_dict()
 
         meta = item_meta.copy()
@@ -215,9 +211,7 @@ class RecommenderOrchestrator(RecommenderModel):
 
         return None
 
-    def calc_metrics(
-        self, k: int, dataset: Dataset, n_splits: int = 3
-    ) -> Dict[str, Any]:
+    def calc_metrics(self, k: int, dataset: Dataset, n_splits: int = 3) -> Dict[str, Any]:
         # The orchestrator is a routing policy; components are evaluated with their
         # own harnesses (EASE via rectools CV, CoVis via next-item offline).
         logger.info("calc_metrics is not applicable to the orchestrator (evaluate components separately)")

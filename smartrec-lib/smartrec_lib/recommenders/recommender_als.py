@@ -195,8 +195,7 @@ class RecommenderALS(RecommenderModel):
         UNDER DEVELOPMENT - not available yet. Use train() for full retraining.
         """
         raise NotImplementedError(
-            "train_partial for ALS is under development and not available yet. "
-            "Use train() for full retraining."
+            "train_partial for ALS is under development and not available yet. " "Use train() for full retraining."
         )
 
     def recommend(
@@ -688,9 +687,7 @@ class RecommenderALS(RecommenderModel):
 
         return None
 
-    def calc_metrics(
-        self, k: int, dataset: Dataset, n_splits: int = 3
-    ) -> Dict[str, Any]:
+    def calc_metrics(self, k: int, dataset: Dataset, n_splits: int = 3) -> Dict[str, Any]:
         assert self.recsys_config is not None
 
         metrics = {

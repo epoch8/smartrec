@@ -77,8 +77,7 @@ class RecommenderEASE(RecommenderModel):
         self.warm_users = set(dataset.user_id_map.external_ids)
 
         logger.info(
-            f"EASE model trained. warm_users={len(self.warm_users)}, "
-            f"items={len(self.item_id_map.external_ids)}"
+            f"EASE model trained. warm_users={len(self.warm_users)}, " f"items={len(self.item_id_map.external_ids)}"
         )
 
     def recommend(
@@ -136,9 +135,7 @@ class RecommenderEASE(RecommenderModel):
 
         return None
 
-    def calc_metrics(
-        self, k: int, dataset: Dataset, n_splits: int = 3
-    ) -> Dict[str, Any]:
+    def calc_metrics(self, k: int, dataset: Dataset, n_splits: int = 3) -> Dict[str, Any]:
         assert self.recsys_config is not None
 
         metrics = {

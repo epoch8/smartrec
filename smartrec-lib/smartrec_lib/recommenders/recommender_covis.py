@@ -93,8 +93,7 @@ class RecommenderCoVis(RecommenderModel):
                 self.neighbors[item] = kept[: self.top_k]
 
         logger.info(
-            f"Co-visitation matrix built. items_with_neighbors={len(self.neighbors)}, "
-            f"baskets={len(baskets)}"
+            f"Co-visitation matrix built. items_with_neighbors={len(self.neighbors)}, " f"baskets={len(baskets)}"
         )
 
     def recommend(
@@ -153,9 +152,7 @@ class RecommenderCoVis(RecommenderModel):
 
         return None
 
-    def calc_metrics(
-        self, k: int, dataset: Dataset, n_splits: int = 3
-    ) -> Dict[str, Any]:
+    def calc_metrics(self, k: int, dataset: Dataset, n_splits: int = 3) -> Dict[str, Any]:
         # Co-visitation is a session/next-item model; it is evaluated with a
         # dedicated next-item harness offline, not with rectools TimeRangeSplitter CV.
         logger.info("calc_metrics is not applicable to CoVis (evaluated offline via next-item harness)")

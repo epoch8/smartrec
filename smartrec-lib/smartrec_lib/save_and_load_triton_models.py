@@ -211,7 +211,6 @@ def clean_old_model_versions(base_s3_url: Pathy, model_name: str, num_to_keep: i
         logger.info("No old versions to delete")
 
 
-
 def copy_file(base_s3_url: Pathy, src_file_path: str, new_file_path: str) -> str:
     """
     Copy a file from one directory to another Bucket.
