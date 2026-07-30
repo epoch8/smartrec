@@ -17,6 +17,12 @@ class PolicyModel(ModelBase[PolicyModelConfig]):
     weighted RRF fusion -> category share cap. Cold and warm users fall back to
     `fallback_source`. Being a ModelBase means the whole cascade is evaluated
     end-to-end with the standard `cross_validate` - no bespoke e2e harness.
+
+    Session-strength proxy: `_recommend_u2i` derives the session-weight tier
+    from the user's TOTAL train interaction count (a proxy for "how engaged is
+    this user"), not from a live session. Online serving instead uses real-time
+    session events, so tier semantics will differ between offline evaluation
+    and production - keep this in mind when comparing offline numbers to A/B results.
     """
 
     recommends_for_warm = True

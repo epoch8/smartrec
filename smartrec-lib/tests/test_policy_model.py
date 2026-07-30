@@ -3,7 +3,7 @@ from rectools import Columns
 from rectools.models import PopularModel, model_from_config
 
 from smartrec_lib.models import CoVisModel
-from smartrec_lib.policy import PolicyModel, PolicyModelConfig, SourceSpec
+from smartrec_lib.policy import PolicyModel
 
 ITEM_COUNTRY_LOCAL = {
     "m1": "maldives", "m2": "maldives", "m3": "maldives",
