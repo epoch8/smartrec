@@ -25,6 +25,18 @@ class ALSSettings(CommonRecommenderSettings):
     POPULARITY_STRATEGY: Literal["n_users", "n_interactions", "mean_weight", "sum_weight"] = "n_users"
     POPULARITY_PERIOD: Optional[timedelta] = timedelta(days=7)
 
+    # Session layer via co-visitation (off by default: prod behavior unchanged).
+    # When ON, the two ALS session paths are replaced per the offline research
+    # (EXPERIMENTS.md 2026-08-02/03): hot user + session -> RRF blend of ALS and
+    # CoVis (+6% map@10 vs pure ALS); unknown user + session -> CoVis (the ALS
+    # item-sim it replaces measured below plain popularity, covis is 4x).
+    SESSION_COVIS_ENABLED: bool = False
+    COVIS_TOP_K: int = 100
+    COVIS_MIN_COOC: int = 2
+    BLEND_ALS_WEIGHT: float = 1.0
+    BLEND_COVIS_WEIGHT: float = 1.0
+    BLEND_RRF_K: int = 60
+
 
 class LighFMSettings(CommonRecommenderSettings):
     RECOMMENDER_RANDOM_STATE: int = 42
@@ -79,6 +91,10 @@ class Strategy(Enum):
     MODEL_REALTIME_HOT_USERS = "model_realtime_hot_users"  # Hot user + real-time events
     MODEL_REALTIME_WARM_USERS = "model_realtime_warm_users"  # New user with real-time events
     MODEL_REALTIME_COLD_USERS = "model_realtime_cold_users"  # Cold user with filtered popular by events
+
+    # ALS+CoVis artifact strategies (session layer replaced by co-visitation)
+    MODEL_ALS_COVIS_BLEND = "als_covis_blend"  # Hot user + session: RRF blend of ALS and CoVis
+    MODEL_COVIS_SESSION = "covis_session"  # Unknown user + session: CoVis (was ALS item-sim)
 
     # Fallback
     NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY = "no_strategy_items_to_recommend_filtered_is_empty"
