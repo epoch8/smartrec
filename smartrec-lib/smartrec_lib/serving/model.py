@@ -122,23 +122,28 @@ class TritonPythonModel:
 
         script_path = os.path.dirname(os.path.abspath(__file__))
 
-        # TODO переделать
         model_load_start = perf_counter()
-        if "als" in self.model_config["name"]:
-            self.model = RecommenderALS.load_model(load_dir=script_path)
-        if "lightfm" in self.model_config["name"]:
-            self.model = RecommenderLightFM.load_model(load_dir=script_path)
-        if "popular" in self.model_config["name"]:
-            self.model = RecommenderPopular.load_model(load_dir=script_path)
-        if "random" in self.model_config["name"]:
-            self.model = RecommenderRandom.load_model(load_dir=script_path)
-        # Orchestrator must be checked before "ease"/"covis" so a name that
-        # happens to contain those substrings still resolves to the orchestrator.
-        if "orchestrator" in self.model_config["name"]:
+        model_name = self.model_config["name"]
+        # Ordered resolution: substring matching bites compound names, so the
+        # chain is a single elif ladder with the most specific names first.
+        # "als_covis_youtravel" MUST load as RecommenderALS (the covis session
+        # layer lives inside it) - the old independent ifs let the bare covis
+        # branch overwrite it, serving an empty-neighbors RecommenderCoVis.
+        if "orchestrator" in model_name:
             self.model = RecommenderOrchestrator.load_model(load_dir=script_path)
-        elif "ease" in self.model_config["name"]:
+        elif "als_covis" in model_name:
+            self.model = RecommenderALS.load_model(load_dir=script_path)
+        elif "lightfm" in model_name:
+            self.model = RecommenderLightFM.load_model(load_dir=script_path)
+        elif "als" in model_name:
+            self.model = RecommenderALS.load_model(load_dir=script_path)
+        elif "popular" in model_name:
+            self.model = RecommenderPopular.load_model(load_dir=script_path)
+        elif "random" in model_name:
+            self.model = RecommenderRandom.load_model(load_dir=script_path)
+        elif "ease" in model_name:
             self.model = RecommenderEASE.load_model(load_dir=script_path)
-        elif "covis" in self.model_config["name"]:
+        elif "covis" in model_name:
             self.model = RecommenderCoVis.load_model(load_dir=script_path)
         model_load_ms = (perf_counter() - model_load_start) * 1000
 
