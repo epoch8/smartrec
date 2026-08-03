@@ -52,11 +52,18 @@ class RecommenderCoVis(RecommenderModel):
 
     @staticmethod
     def _parse_history(history: Optional[List]) -> List[str]:
-        """Parse history entries "tour_id:weight" / "tour_id" / int into tour ids."""
-        if not history:
+        """Parse history entries "tour_id:weight" / "tour_id" / int into tour ids.
+
+        Accepts any sequence, including the numpy array of (possibly bytes)
+        strings that Triton serving passes in: `if not history` on a
+        multi-element ndarray raises ValueError, hence the explicit len check.
+        """
+        if history is None or len(history) == 0:
             return []
         items: List[str] = []
         for entry in history:
+            if isinstance(entry, bytes):
+                entry = entry.decode("utf-8", errors="ignore")
             s = str(entry)
             items.append(s.split(":", 1)[0] if ":" in s else s)
         return items

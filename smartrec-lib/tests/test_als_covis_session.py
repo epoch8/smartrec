@@ -76,3 +76,23 @@ def test_cold_user_without_session_serves_popular(dataset):
     result = model.recommend("ghost-user", top_n=3, filter_viewed=False, history=None)
     assert result.strategy == Strategy.MODEL_COLD_USERS.value
     assert result.item_ids
+
+
+# --- Triton serving input shapes (regression for the live dev incident) ------
+
+
+def test_session_paths_accept_numpy_history(dataset):
+    """Triton serving passes history as a numpy array of (bytes) strings;
+    `if not history` on a multi-element ndarray raises ValueError."""
+    import numpy as np
+
+    model = _fitted(dataset, SESSION_COVIS_ENABLED=True, COVIS_MIN_COOC=2)
+    history_np = np.array(["m1", "m2"], dtype=object)
+    result = model.recommend("ghost-user", top_n=3, filter_viewed=True, history=history_np)
+    assert result.strategy == Strategy.MODEL_COVIS_SESSION.value
+    assert result.item_ids
+
+    history_bytes = np.array([b"m2:1.0", b"m1:2.0"], dtype=object)
+    result = model.recommend("u1", top_n=3, filter_viewed=True, history=history_bytes)
+    assert result.strategy == Strategy.MODEL_ALS_COVIS_BLEND.value
+    assert set(result.item_ids).isdisjoint({"m1", "m2", "pop1"})
