@@ -45,10 +45,12 @@ jobs:
     - name: Lint with flake8
       working-directory: ./smartrec-lib
       run: |
+        # flake8 is not in the lib's dev dependency group; newer uv syncs
+        # strictly by group, so install it ephemerally for this step.
         # stop the build if there are Python syntax errors or undefined names
-        uv run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --ignore F821
+        uv run --with flake8 flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --ignore F821
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        uv run flake8 . --ignore=C901,F821 --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        uv run --with flake8 flake8 . --ignore=C901,F821 --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest
       working-directory: ./smartrec-lib
       run: |
