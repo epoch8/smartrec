@@ -256,14 +256,14 @@ class RecommenderALS(RecommenderModel):
 
         # Determine user type and check for real-time history
         is_hot_user = user_ids in self.user_id_map.external_ids and user_ids in self.user_ids_hot
-        has_realtime_history = history is not None and len(history) > 0
+        has_session_history = history is not None and len(history) > 0
 
         # HOT USER (in training data)
         if is_hot_user:
-            if has_realtime_history:
+            if has_session_history:
                 # Hot user + real-time events = enrich ALS with recent behavior
                 logger.info(f"Hot user with real-time enrichment: user={user_ids}, history_size={len(history)}")
-                return self._recommend_hot_user_with_realtime(
+                return self._recommend_hot_user_with_session(
                     user_ids=user_ids,
                     top_n=top_n,
                     filter_viewed=filter_viewed,
@@ -295,7 +295,7 @@ class RecommenderALS(RecommenderModel):
                 )
 
         # WARM USER (new user with real-time events)
-        elif has_realtime_history:
+        elif has_session_history:
             logger.info(f"Warm user with real-time history: user={user_ids}, history_size={len(history)}")
             return self.recommend_unknown_user_with_history(
                 user_ids=user_ids,
@@ -444,7 +444,7 @@ class RecommenderALS(RecommenderModel):
         )
         return RecomItems(item_ids=items, scores=scores, strategy=Strategy.MODEL_ALS_COVIS_BLEND.value)
 
-    def _recommend_hot_user_with_realtime(
+    def _recommend_hot_user_with_session(
         self,
         user_ids: int,
         top_n: int,
