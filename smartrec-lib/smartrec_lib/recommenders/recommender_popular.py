@@ -47,7 +47,9 @@ class RecommenderPopular(RecommenderModel):
         self.dataset: Dataset = None  # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
-        self.strategy = Strategy.MODEL_HOT_AND_COLD_USERS
+        # Popular serves as the cold-user fallback: hot users get a proper
+        # personalized feed elsewhere, so the label reflects the actual role.
+        self.strategy = Strategy.MODEL_COLD_USERS
 
     def train(self, dataset: Dataset):
         assert self.recsys_config is not None
