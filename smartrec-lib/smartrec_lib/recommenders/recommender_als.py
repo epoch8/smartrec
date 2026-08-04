@@ -204,6 +204,7 @@ class RecommenderALS(RecommenderModel):
                 RECOMMENDER_RANDOM_STATE=self.recsys_config.RECOMMENDER_RANDOM_STATE,
                 COVIS_TOP_K=self.recsys_config.COVIS_TOP_K,
                 COVIS_MIN_COOC=self.recsys_config.COVIS_MIN_COOC,
+                COVIS_SESSION_WEIGHTS=getattr(self.recsys_config, "COVIS_SESSION_WEIGHTS", False),
             )
             self.covis = RecommenderCoVis(
                 recsys_config=covis_config, model_name=self.model_name, model_version=self.model_version

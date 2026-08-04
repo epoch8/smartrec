@@ -49,10 +49,13 @@ class RecommenderCoVis(RecommenderModel):
         # {tour_id: [(neighbor_tour_id, score), ...]} sorted by score desc
         self.neighbors: Dict[str, List[Tuple[str, float]]] = {}
         self.top_k: int = 100
+        # "sw" scoring variant: multiply seed recency by the API event weight.
+        self.session_weights_enabled: bool = False
 
     @staticmethod
-    def _parse_history(history: Optional[List]) -> List[str]:
-        """Parse history entries "tour_id:weight" / "tour_id" / int into tour ids.
+    def _parse_history(history: Optional[List]) -> List[Tuple[str, float]]:
+        """Parse history entries "tour_id:weight" / "tour_id" / int into
+        (tour_id, weight) pairs; missing or malformed weight -> 1.0.
 
         Accepts any sequence, including the numpy array of (possibly bytes)
         strings that Triton serving passes in: `if not history` on a
@@ -60,12 +63,20 @@ class RecommenderCoVis(RecommenderModel):
         """
         if history is None or len(history) == 0:
             return []
-        items: List[str] = []
+        items: List[Tuple[str, float]] = []
         for entry in history:
             if isinstance(entry, bytes):
                 entry = entry.decode("utf-8", errors="ignore")
             s = str(entry)
-            items.append(s.split(":", 1)[0] if ":" in s else s)
+            if ":" in s:
+                tour_id, _, raw_w = s.partition(":")
+                try:
+                    weight = float(raw_w)
+                except ValueError:
+                    weight = 1.0
+                items.append((tour_id, weight))
+            else:
+                items.append((s, 1.0))
         return items
 
     def train(self, dataset: Dataset):
@@ -73,6 +84,7 @@ class RecommenderCoVis(RecommenderModel):
 
         self.top_k = self.recsys_config.COVIS_TOP_K
         min_cooc = self.recsys_config.COVIS_MIN_COOC
+        self.session_weights_enabled = bool(getattr(self.recsys_config, "COVIS_SESSION_WEIGHTS", False))
 
         logger.info("Building co-visitation matrix...")
         df = dataset.interactions.df
@@ -117,20 +129,27 @@ class RecommenderCoVis(RecommenderModel):
             return RecomItems(item_ids=[], scores=[], strategy=Strategy.MODEL_REALTIME_WARM_USERS.value)
 
         allow = set(str(x) for x in items_to_recommend) if items_to_recommend is not None else None
-        seen = set(seed)
+        seen = set(item for item, _ in seed)
+
+        # getattr: artifacts pickled before the flag existed lack the attribute.
+        use_session_weights = getattr(self, "session_weights_enabled", False)
 
         # Recency-weighted aggregation of neighbor scores. get_user_history returns
-        # most-recent-first, so earlier positions get a higher weight.
+        # most-recent-first, so earlier positions get a higher weight. With
+        # COVIS_SESSION_WEIGHTS on, the API event weight of the seed (view 1.0,
+        # booking intent 2.0, paid 3.0) multiplies recency ("sw" variant,
+        # EXPERIMENTS.md 2026-08-03/04).
         scores: Dict[str, float] = defaultdict(float)
         n = len(seed)
-        for pos, item in enumerate(seed):
+        for pos, (item, seed_weight) in enumerate(seed):
             recency = (n - pos) / n
+            mult = recency * (seed_weight if use_session_weights else 1.0)
             for neighbor, w in self.neighbors.get(item, []):
                 if filter_viewed and neighbor in seen:
                     continue
                 if allow is not None and neighbor not in allow:
                     continue
-                scores[neighbor] += w * recency
+                scores[neighbor] += w * mult
 
         ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
 

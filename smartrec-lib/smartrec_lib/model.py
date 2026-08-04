@@ -33,6 +33,10 @@ class ALSSettings(CommonRecommenderSettings):
     SESSION_COVIS_ENABLED: bool = False
     COVIS_TOP_K: int = 100
     COVIS_MIN_COOC: int = 2
+    # "sw" variant (EXPERIMENTS.md 2026-08-04): seed recency is multiplied by
+    # the API event weight (view 1.0 / booking intent 2.0 / paid 3.0). Off by
+    # default: scoring is byte-identical to the unweighted covis.
+    COVIS_SESSION_WEIGHTS: bool = False
     BLEND_ALS_WEIGHT: float = 1.0
     BLEND_COVIS_WEIGHT: float = 1.0
     BLEND_RRF_K: int = 60
@@ -57,6 +61,7 @@ class CoVisSettings(CommonRecommenderSettings):
     # candidates by co-occurrence with the items in the user's real-time history.
     COVIS_TOP_K: int = 100  # neighbors kept per item
     COVIS_MIN_COOC: int = 2  # minimum co-occurrence count to keep an edge
+    COVIS_SESSION_WEIGHTS: bool = False  # "sw": seed recency x API event weight
 
 
 class OrchestratorSettings(CommonRecommenderSettings):
