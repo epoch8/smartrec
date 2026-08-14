@@ -1,4 +1,4 @@
-from smartrec_lib.policy.constraints import apply_share_cap
+from smartrec_lib.kernels.constraints import apply_share_cap
 
 CATS = {"m1": "mv", "m2": "mv", "m3": "mv", "m4": "mv", "t1": "tr", "t2": "tr"}
 

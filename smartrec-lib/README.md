@@ -109,30 +109,45 @@ uv run pytest smartrec-lib/tests
 Conventions: keep style-only changes in separate commits from logic changes;
 new code must come in already formatted (no follow-up "apply black" commits).
 
-## v2 core (rectools-native)
+## Layout
 
-New-generation components live next to the legacy `recommenders/` package and
-follow the rectools `ModelBase` contract, so configs, save/load and
+```
+smartrec_lib/
+  model.py          L0  contract: RecomItems, Strategy, *Settings (frozen by pickles)
+  kernels/          L1  pure algorithms: cooccurrence, fusion, constraints
+  recommenders/     L2  the servable models; module paths frozen by pickles
+  serving/          L2  Triton python backend (model.py + config.pbtxt)
+  research/         L3  rectools-native CoVisModel and PolicyModel
+  evaluation/       L3  offline protocols
+```
+
+Imports flow strictly downward, and `recommenders/` never imports `research/`.
+The rules, and the invariants that make the L2 paths frozen, are in
+[../CLAUDE.md](../CLAUDE.md).
+
+## Research components (rectools-native)
+
+These follow the rectools `ModelBase` contract, so configs, save/load and
 `cross_validate` come from the framework:
 
-- `smartrec_lib.models` - custom models missing from rectools. `CoVisModel`:
-  session co-visitation; the online path (`recommend_for_session`) and the
-  offline u2i path share one scoring routine (offline == online parity).
-- `smartrec_lib.policy` - the serving policy as a regular rectools model:
-  candidate sources (any rectools model config) -> weighted Reciprocal Rank
-  Fusion -> category share cap; cold users fall back to the popularity source.
-  Session source weight scales with session strength (one click is weak
+- `smartrec_lib.research.covis` - `CoVisModel`, session co-visitation; the
+  online path (`recommend_for_session`) and the offline u2i path share one
+  scoring routine (offline == online parity).
+- `smartrec_lib.research.policy` - the serving policy as a regular rectools
+  model: candidate sources (any rectools model config) -> weighted Reciprocal
+  Rank Fusion -> category share cap; cold users fall back to the popularity
+  source. Session source weight scales with session strength (one click is weak
   evidence - it must not turn the feed into a mono-category page).
 - `smartrec_lib.evaluation` - three offline protocols: `evaluate_warm_cv`
   (accuracy + beyond-accuracy preset, ref model support), `evaluate_next_item`
   (session replay with `served_frac`), `evaluate_e2e` (whole system with cold
   users kept, hot/cold segments).
 
-Legacy `recommenders/` stay untouched and keep serving production; migration is
-tracked in the parent repo (`app/docs/SMARTREC_V2_RESEARCH.md`).
+`recommenders/` keep serving production; migration is tracked in the parent
+repo (`app/docs/SMARTREC_V2_RESEARCH.md`).
 
-Having two hierarchies means the co-visitation algorithm exists twice
-(`models/covis.py` and `recommenders/recommender_covis.py`). Where the two agree
-and where they have drifted is pinned by `tests/test_covis_equivalence.py` and
-analysed, with unification options, in
-[docs/DESIGN_UNIFICATION.md](docs/DESIGN_UNIFICATION.md).
+The co-visitation algorithm is written once, in `kernels/cooccurrence.py`. The
+serving shell and `research/covis.py` differ only in the parameters they pass
+(basket and session caps, per-seed event weights, tie determinism); which of
+those differences are intentional is pinned by `tests/test_covis_equivalence.py`
+and analysed in [docs/DESIGN_UNIFICATION.md](docs/DESIGN_UNIFICATION.md).

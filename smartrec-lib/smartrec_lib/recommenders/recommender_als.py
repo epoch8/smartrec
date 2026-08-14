@@ -20,8 +20,8 @@ from rectools.models import ImplicitALSWrapperModel, PopularModel
 from scipy import sparse
 
 from smartrec_lib.model import ALSSettings, RecomItems, Strategy
-from smartrec_lib.policy.fusion import rrf_fuse
-from smartrec_lib.recommenders import RecommenderModel
+from smartrec_lib.kernels.fusion import rrf_fuse
+from smartrec_lib.recommenders.base import RecommenderModel
 from smartrec_lib.recommenders.recommender_covis import RecommenderCoVis
 from smartrec_lib.save_and_load_triton_models import (
     clean_old_model_versions,

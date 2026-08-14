@@ -20,7 +20,7 @@ from rectools import Columns
 from rectools.dataset import Dataset
 
 from smartrec_lib.model import CoVisSettings
-from smartrec_lib.models.covis import CoVisModel
+from smartrec_lib.research.covis import CoVisModel
 from smartrec_lib.recommenders import RecommenderCoVis
 
 BASE = pd.Timestamp("2026-07-01")

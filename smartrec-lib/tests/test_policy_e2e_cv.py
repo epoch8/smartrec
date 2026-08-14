@@ -3,11 +3,11 @@ from rectools.model_selection import TimeRangeSplitter, cross_validate
 from rectools.models import model_from_config
 
 POLICY_CONFIG = {
-    "cls": "smartrec_lib.policy.model.PolicyModel",
+    "cls": "smartrec_lib.research.policy.PolicyModel",
     "sources": {
         "popular": {"model": {"cls": "PopularModel"}, "weight": 1.0},
         "covis": {
-            "model": {"cls": "smartrec_lib.models.covis.CoVisModel", "min_cooc": 2},
+            "model": {"cls": "smartrec_lib.research.covis.CoVisModel", "min_cooc": 2},
             "weight": 1.0,
             "is_session": True,
         },

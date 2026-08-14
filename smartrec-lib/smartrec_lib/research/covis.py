@@ -1,11 +1,18 @@
+"""Layer L3: the research co-visitation model. Shares one algorithm with the
+serving shell (`recommenders/recommender_covis.py`) via `kernels.cooccurrence`;
+the two differ only in the explicit parameters they pass, which is exactly what
+`tests/test_covis_equivalence.py` pins.
+"""
+
 import typing as tp
 from collections import defaultdict
-from itertools import combinations
 
 import typing_extensions as tpe
 from rectools import Columns
 from rectools.dataset import Dataset
 from rectools.models.base import ModelBase, ModelConfig
+
+from smartrec_lib.kernels.cooccurrence import build_neighbor_map, score_session
 
 
 class CoVisModelConfig(ModelConfig):
@@ -71,34 +78,26 @@ class CoVisModel(ModelBase[CoVisModelConfig]):
 
     def _fit(self, dataset: Dataset) -> None:
         df = dataset.interactions.df  # internal ids
-        # Cap each user's basket to their most recent `fit_basket_size`
-        # interactions before building co-occurrence pairs: a basket of size N
-        # produces C(N, 2) pairs, so bot/power users with thousands of
-        # interactions would otherwise blow up _fit's runtime and memory.
+        # Baskets are handed to the kernel most-recent-first, so its
+        # `fit_basket_size` truncation keeps each user's most recent
+        # interactions. The cap matters because a basket of size N produces
+        # C(N, 2) pairs: bot/power users with thousands of interactions would
+        # otherwise blow up fit runtime and memory.
         if len(df) > 0:
-            df = (
-                df.sort_values(Columns.Datetime, ascending=False)
-                .groupby(Columns.User, sort=False)
-                .head(self.fit_basket_size)
-            )
-        baskets: tp.Dict[int, tp.Set[int]] = defaultdict(set)
+            df = df.sort_values(Columns.Datetime, ascending=False)
+        baskets: tp.Dict[int, tp.List[int]] = defaultdict(list)
         for user, item in zip(df[Columns.User].values, df[Columns.Item].values):
-            baskets[int(user)].add(int(item))
+            baskets[int(user)].append(int(item))
 
-        cooc: tp.Dict[int, tp.Dict[int, int]] = defaultdict(lambda: defaultdict(int))
-        for basket in baskets.values():
-            if len(basket) < 2:
-                continue
-            for a, b in combinations(sorted(basket), 2):
-                cooc[a][b] += 1
-                cooc[b][a] += 1
-
-        self.neighbors = {}
-        for item, nbrs in cooc.items():
-            kept = [(n, float(c)) for n, c in nbrs.items() if c >= self.min_cooc]
-            kept.sort(key=lambda pair: (-pair[1], pair[0]))  # deterministic: count desc, id asc
-            if kept:
-                self.neighbors[item] = kept[: self.top_k]
+        self.neighbors = build_neighbor_map(
+            baskets.values(),
+            min_cooc=self.min_cooc,
+            top_k=self.top_k,
+            fit_basket_size=self.fit_basket_size,
+            # Research results must be reproducible run to run; the serving
+            # shell deliberately keeps hash order instead (CLAUDE.md section 8).
+            deterministic_ties=True,
+        )
 
     def _score_session(
         self,
@@ -107,22 +106,20 @@ class CoVisModel(ModelBase[CoVisModelConfig]):
         allowed: tp.Optional[tp.AbstractSet[int]],
         k: int,
     ) -> tp.List[tp.Tuple[int, float]]:
-        """Recency-weighted neighbor scores for a most-recent-first session (internal ids)."""
-        seed = list(session)[: self.session_size]
-        if not seed:
-            return []
-        scores: tp.Dict[int, float] = defaultdict(float)
-        n = len(seed)
-        for pos, item in enumerate(seed):
-            recency = (n - pos) / n
-            for neighbor, weight in self.neighbors.get(item, []):
-                if neighbor in exclude:
-                    continue
-                if allowed is not None and neighbor not in allowed:
-                    continue
-                scores[neighbor] += weight * recency
-        ranked = sorted(scores.items(), key=lambda pair: (-pair[1], pair[0]))
-        return ranked[:k]
+        """Recency-weighted neighbor scores for a most-recent-first session (internal ids).
+
+        No per-seed event weights here: the API event weight only exists on the
+        serving side, where history arrives as "tour_id:weight".
+        """
+        return score_session(
+            self.neighbors,
+            session,
+            k=k,
+            exclude=exclude,
+            allowed=allowed,
+            session_size=self.session_size,
+            deterministic_ties=True,
+        )
 
     def _recommend_u2i(
         self,
