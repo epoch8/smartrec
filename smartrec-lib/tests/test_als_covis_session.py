@@ -1,10 +1,10 @@
-"""Tests for the covis session layer inside RecommenderALS (SESSION_COVIS_ENABLED).
+"""Tests for the covis session layer inside RecommenderALS (recsys_config.covis).
 
 Uses the shared synthetic dataset from conftest.py: maldives cluster (u1-u3,
 m1-m3), turkey cluster (u4-u6, t1-t3), globally popular pop1.
 """
 
-from smartrec_lib.model import ALSSettings, Strategy
+from smartrec_lib.model import ALSSettings, CoVisSettings, Strategy
 from smartrec_lib.recommenders import RecommenderALS
 
 BASE = dict(
@@ -23,32 +23,33 @@ def _fitted(dataset, **overrides):
     return model
 
 
-# --- flag OFF (default): prod behavior byte-for-byte -------------------------
+# --- no covis sub-config (default): prod behavior byte-for-byte --------------
 
 
-def test_flag_off_hot_user_with_session_keeps_realtime_strategy(dataset):
+def test_no_covis_config_hot_user_with_session_keeps_realtime_strategy(dataset):
     model = _fitted(dataset)
     result = model.recommend("u1", top_n=3, filter_viewed=True, history=["m2", "m1"])
     assert result.strategy == Strategy.MODEL_REALTIME_HOT_USERS.value
 
 
-def test_flag_off_trains_no_covis_layer(dataset):
+def test_no_covis_config_trains_no_covis_layer(dataset):
     model = _fitted(dataset)
+    assert model.recsys_config.covis is None
     assert model.covis is None
 
 
-# --- flag ON: session paths replaced by covis ---------------------------------
+# --- covis sub-config present: session paths replaced by covis ----------------
 
 
 def test_hot_user_without_session_serves_pure_als(dataset):
-    model = _fitted(dataset, SESSION_COVIS_ENABLED=True, COVIS_MIN_COOC=2)
+    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("u1", top_n=3, filter_viewed=True, history=None)
     assert result.strategy == Strategy.MODEL_HOT_USERS.value
     assert result.item_ids
 
 
 def test_hot_user_with_session_serves_blend(dataset):
-    model = _fitted(dataset, SESSION_COVIS_ENABLED=True, COVIS_MIN_COOC=2)
+    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("u1", top_n=3, filter_viewed=True, history=["m2", "m1"])
     assert result.strategy == Strategy.MODEL_ALS_COVIS_BLEND.value
     assert result.item_ids
@@ -57,7 +58,7 @@ def test_hot_user_with_session_serves_blend(dataset):
 
 
 def test_unknown_user_with_session_serves_covis(dataset):
-    model = _fitted(dataset, SESSION_COVIS_ENABLED=True, COVIS_MIN_COOC=2)
+    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("ghost-user", top_n=3, filter_viewed=True, history=["m1", "m2"])
     assert result.strategy == Strategy.MODEL_COVIS_SESSION.value
     assert result.item_ids
@@ -66,13 +67,13 @@ def test_unknown_user_with_session_serves_covis(dataset):
 
 def test_unknown_user_with_unknown_session_falls_back(dataset):
     # History covis has never seen -> covis empty -> parent item-sim path answers.
-    model = _fitted(dataset, SESSION_COVIS_ENABLED=True, COVIS_MIN_COOC=2)
+    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("ghost-user", top_n=3, filter_viewed=True, history=["nope-1", "nope-2"])
     assert result.strategy != Strategy.MODEL_COVIS_SESSION.value
 
 
 def test_cold_user_without_session_serves_popular(dataset):
-    model = _fitted(dataset, SESSION_COVIS_ENABLED=True, COVIS_MIN_COOC=2)
+    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("ghost-user", top_n=3, filter_viewed=False, history=None)
     assert result.strategy == Strategy.MODEL_COLD_USERS.value
     assert result.item_ids
@@ -86,7 +87,7 @@ def test_session_paths_accept_numpy_history(dataset):
     `if not history` on a multi-element ndarray raises ValueError."""
     import numpy as np
 
-    model = _fitted(dataset, SESSION_COVIS_ENABLED=True, COVIS_MIN_COOC=2)
+    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
     history_np = np.array(["m1", "m2"], dtype=object)
     result = model.recommend("ghost-user", top_n=3, filter_viewed=True, history=history_np)
     assert result.strategy == Strategy.MODEL_COVIS_SESSION.value

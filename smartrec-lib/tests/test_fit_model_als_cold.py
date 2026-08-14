@@ -5,7 +5,7 @@ import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
 
-from smartrec_lib.model import ALSSettings, Strategy
+from smartrec_lib.model import ALSSettings, PopularSettings, Strategy
 from smartrec_lib.recommenders import RecommenderALS
 
 recsys_config_als = ALSSettings(
@@ -15,8 +15,7 @@ recsys_config_als = ALSSettings(
     ALS_FACTORS=256,  # latent embeddings size
     ALS_ALPHA=50,  # confidence multiplier for non-zero entries in interactions
     RECOMMENDER_DAYS_THRESHOLD=14,
-    POPULARITY_STRATEGY="n_users",
-    POPULARITY_PERIOD=timedelta(days=1),
+    popular=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=1)),
 )
 
 test_data = Path(__file__).parent

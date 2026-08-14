@@ -84,7 +84,7 @@ class RecommenderCoVis(RecommenderModel):
 
         self.top_k = self.recsys_config.COVIS_TOP_K
         min_cooc = self.recsys_config.COVIS_MIN_COOC
-        self.session_weights_enabled = bool(getattr(self.recsys_config, "COVIS_SESSION_WEIGHTS", False))
+        self.session_weights_enabled = bool(self.recsys_config.COVIS_SESSION_WEIGHTS)
 
         logger.info("Building co-visitation matrix...")
         df = dataset.interactions.df

@@ -61,9 +61,7 @@ def test_als_covis_layer_inherits_the_flag(dataset):
         ALS_FACTORS=8,
         ALS_ALPHA=10,
         RECOMMENDER_DAYS_THRESHOLD=30,
-        SESSION_COVIS_ENABLED=True,
-        COVIS_MIN_COOC=2,
-        COVIS_SESSION_WEIGHTS=True,
+        covis=CoVisSettings(COVIS_MIN_COOC=2, COVIS_SESSION_WEIGHTS=True),
     )
     model = RecommenderALS(recsys_config=config, model_name="als_test", model_version="1")
     model.train(dataset)
