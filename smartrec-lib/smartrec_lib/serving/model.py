@@ -10,7 +10,10 @@ import triton_python_backend_utils as pb_utils
 
 from smartrec_lib.recommenders import (
     RecommenderALS,
+    RecommenderCoVis,
+    RecommenderEASE,
     RecommenderLightFM,
+    RecommenderOrchestrator,
     RecommenderPopular,
     RecommenderRandom,
 )
@@ -60,6 +63,9 @@ class TritonPythonModel:
             "LightFM Model",
             "Popular Model",
             "Random Model",
+            "EASE Model",
+            "CoVis Model",
+            "Orchestrator Model",
             "Base Model",
             "ALS Model saving stage:",
         )
@@ -116,16 +122,29 @@ class TritonPythonModel:
 
         script_path = os.path.dirname(os.path.abspath(__file__))
 
-        # TODO переделать
         model_load_start = perf_counter()
-        if "als" in self.model_config["name"]:
+        model_name = self.model_config["name"]
+        # Ordered resolution: substring matching bites compound names, so the
+        # chain is a single elif ladder with the most specific names first.
+        # "als_covis_youtravel" MUST load as RecommenderALS (the covis session
+        # layer lives inside it) - the old independent ifs let the bare covis
+        # branch overwrite it, serving an empty-neighbors RecommenderCoVis.
+        if "orchestrator" in model_name:
+            self.model = RecommenderOrchestrator.load_model(load_dir=script_path)
+        elif "als_covis" in model_name:
             self.model = RecommenderALS.load_model(load_dir=script_path)
-        if "lightfm" in self.model_config["name"]:
+        elif "lightfm" in model_name:
             self.model = RecommenderLightFM.load_model(load_dir=script_path)
-        if "popular" in self.model_config["name"]:
+        elif "als" in model_name:
+            self.model = RecommenderALS.load_model(load_dir=script_path)
+        elif "popular" in model_name:
             self.model = RecommenderPopular.load_model(load_dir=script_path)
-        if "random" in self.model_config["name"]:
+        elif "random" in model_name:
             self.model = RecommenderRandom.load_model(load_dir=script_path)
+        elif "ease" in model_name:
+            self.model = RecommenderEASE.load_model(load_dir=script_path)
+        elif "covis" in model_name:
+            self.model = RecommenderCoVis.load_model(load_dir=script_path)
         model_load_ms = (perf_counter() - model_load_start) * 1000
 
         cache_warm_ms = 0.0
@@ -212,17 +231,30 @@ class TritonPythonModel:
                 history = decoder(history.as_numpy())
             else:
                 history = None
+
+            # Optional context (JSON string): country/region/type from the request
+            # filters. Only the orchestrator consumes it.
+            context = pb_utils.get_input_tensor_by_name(request, "context")
+            if context is not None and len(context.as_numpy()) > 0:
+                raw = context.as_numpy()[0].decode("utf-8")
+                context = json.loads(raw) if raw else None
+            else:
+                context = None
             parse_ms = (perf_counter() - parse_start) * 1000
 
             # ----- Вызов модели рекомендаций -----
             recommend_start = perf_counter()
-            recommendations = self.model.recommend(
+            recommend_kwargs = dict(
                 user_ids=user_ids,
                 items_to_recommend=items_to_recommend,
                 top_n=top_n,
                 filter_viewed=filter_viewed,
                 history=history,
             )
+            # Other models' recommend() signatures do not accept context.
+            if isinstance(self.model, RecommenderOrchestrator):
+                recommend_kwargs["context"] = context
+            recommendations = self.model.recommend(**recommend_kwargs)
             recommend_ms = (perf_counter() - recommend_start) * 1000
 
             # ----- Конвертация ответа в Triton формат -----

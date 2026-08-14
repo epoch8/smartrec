@@ -40,9 +40,7 @@ class RecommenderModel:
         )
 
     @abstractmethod
-    def calc_metrics(
-        self, k: int, dataset: Dataset, n_splits: int = 3
-    ) -> Dict[str, Any]:
+    def calc_metrics(self, k: int, dataset: Dataset, n_splits: int = 3) -> Dict[str, Any]:
         raise NotImplementedError()
 
     @abstractmethod

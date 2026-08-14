@@ -1,3 +1,4 @@
+import json
 import logging
 from time import perf_counter
 from typing import Dict, List, Optional
@@ -108,6 +109,7 @@ def recommendations_triton_with_client(
     filter_viewed: bool,
     items_to_recommend: Optional[List[str]] = None,
     history: Optional[List[str]] = None,
+    context: Optional[Dict] = None,
 ) -> dict:
     """
     Method to obtain recommendations using an existing Triton client (connection pooling).
@@ -118,6 +120,8 @@ def recommendations_triton_with_client(
     :param filter_viewed: Whether to filter viewed items.
     :param items_to_recommend: Optional list of items to restrict recommendations to.
     :param history: Optional list of item IDs from user's interaction history (for warm/new users).
+    :param context: Optional request context (e.g. {"country": ...}); only consumed by
+        models whose Triton config declares a "context" input (the orchestrator).
 
     :return: Dictionary with model version, data, and strategy.
     """
@@ -132,6 +136,9 @@ def recommendations_triton_with_client(
     if history is not None and len(history) > 0:
         inputs["history"] = np.array(history, dtype=np.object_)
 
+    if context:
+        inputs["context"] = np.array([json.dumps(context)], dtype=np.object_)
+
     recom_item_users = client(**inputs)
 
     return {"model_version": client.metadata["versions"][0], "data": recom_item_users}
@@ -145,6 +152,7 @@ def recommendations_triton(
     filter_viewed: bool,
     items_to_recommend: Optional[List[str]] = None,
     history: Optional[List[str]] = None,
+    context: Optional[Dict] = None,
 ) -> dict:
     """
     Method to obtain recommendations from Triton Inference Server.
@@ -168,4 +176,5 @@ def recommendations_triton(
         filter_viewed=filter_viewed,
         items_to_recommend=items_to_recommend,
         history=history,
+        context=context,
     )

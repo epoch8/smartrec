@@ -1,7 +1,6 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-import pandas as pd
 from pathy import Pathy
 from rectools.dataset import Dataset
 from rectools.dataset.identifiers import IdMap
@@ -14,25 +13,41 @@ from rectools.metrics import (
     novelty,
 )
 from rectools.model_selection import TimeRangeSplitter, cross_validate
-from rectools.models import PopularModel
+from rectools.models import EASEModel
 
-from smartrec_lib.model import PopularSettings, RecomItems, Strategy
+from smartrec_lib.model import EASESettings, RecomItems, Strategy
 from smartrec_lib.recommenders import RecommenderModel
 from smartrec_lib.save_and_load_triton_models import (
     clean_old_model_versions,
     upload_model_files,
 )
 
-logger = logging.getLogger("Popular Model")
+logger = logging.getLogger("EASE Model")
 logger.setLevel(logging.INFO)
 
 
-class RecommenderPopular(RecommenderModel):
-    model_architecture = "popular"
+class RecommenderEASE(RecommenderModel):
+    """
+    Item-item recommender based on EASE^R (closed-form shallow autoencoder).
+
+    Warm ranker only. Offline k-fold benchmarks (30-day training window) showed
+    EASE^R outperforming the production ALS on both the click and the real-booking
+    targets, with higher catalog coverage and lower popularity bias.
+
+    Cold users (not present in training data) are NOT served here: recommend()
+    returns an empty result with a cold strategy marker, and routing them (popular,
+    segment popularity, co-visitation from the first click) is the responsibility
+    of the orchestrator / cascade layer, not of this model.
+
+    The `history` argument is accepted for interface compatibility but is not used
+    yet; real-time session handling is planned for the orchestrator layer.
+    """
+
+    model_architecture = "ease"
 
     def __init__(
         self,
-        recsys_config: Optional[PopularSettings] = None,
+        recsys_config: Optional[EASESettings] = None,
         model_name: Optional[str] = None,
         model_version: Optional[str] = None,
     ) -> None:
@@ -42,31 +57,28 @@ class RecommenderPopular(RecommenderModel):
         self.model_name = model_name or "-"
         self.recsys_config = recsys_config
 
-        # base and feature models
-        self.model: PopularModel = None
+        self.model: EASEModel = None
         self.dataset: Dataset = None  # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
-        # Popular serves as the cold-user fallback: hot users get a proper
-        # personalized feed elsewhere, so the label reflects the actual role.
-        self.strategy = Strategy.MODEL_COLD_USERS
+        self.warm_users: set = set()
 
     def train(self, dataset: Dataset):
         assert self.recsys_config is not None
 
         self.dataset = dataset
 
-        logger.info("Fitting model...")
-
-        self.model = PopularModel(
-            popularity=self.recsys_config.POPULARITY_STRATEGY,
-            period=self.recsys_config.POPULARITY_PERIOD,
-        )
+        logger.info("Fitting EASE model...")
+        self.model = EASEModel(regularization=self.recsys_config.EASE_REGULARIZATION)
         self.model.fit(dataset)
+
         self.user_id_map = dataset.user_id_map
         self.item_id_map = dataset.item_id_map
+        self.warm_users = set(dataset.user_id_map.external_ids)
 
-        logger.info("Base models trained.")
+        logger.info(
+            f"EASE model trained. warm_users={len(self.warm_users)}, " f"items={len(self.item_id_map.external_ids)}"
+        )
 
     def recommend(
         self,
@@ -76,9 +88,14 @@ class RecommenderPopular(RecommenderModel):
         items_to_recommend: Optional[List[int]] = None,
         history: Optional[List[int]] = None,
     ) -> RecomItems:  # Return type is a RecomItems
+        # Warm ranker only. Cold users are routed by the orchestrator/cascade layer.
+        if user_ids not in self.warm_users:
+            logger.info(f"User {user_ids} is cold for EASE, returning empty (route elsewhere)")
+            return RecomItems(item_ids=[], scores=[], strategy=Strategy.MODEL_COLD_USERS.value)
+
         logger.info(f"Predicting for user {user_ids}")
-        # user can be in the short memory, long memory or nowhere
-        recos: pd.DataFrame = self.model.recommend(
+
+        recos = self.model.recommend(
             users=[user_ids],
             dataset=self.dataset,
             k=top_n,
@@ -86,27 +103,21 @@ class RecommenderPopular(RecommenderModel):
             items_to_recommend=(items_to_recommend if items_to_recommend is None else list(items_to_recommend)),
         )
 
-        recos = recos.sort_values(["user_id", "score"], ascending=False).reset_index(
-            drop=True
-        )  # Assuming 'user_id' is the column name
+        recos = recos.sort_values(["user_id", "score"], ascending=False).reset_index(drop=True)
 
         return RecomItems(
             item_ids=recos.item_id.astype(str).tolist(),
             scores=recos.score.tolist(),
-            strategy=self.strategy,
+            strategy=Strategy.MODEL_HOT_USERS.value,
         )
 
     def save_model_triton(self, base_s3_url: Pathy, num_to_keep: int) -> None:
         """
-        Save the model to either a file or a stream.
+        Save the model to S3 for Triton serving.
 
         Parameters:
-            :param fs: fsspec filesystem object.
             :param base_s3_url: The base URL in S3 (e.g., s3://bucket-name).
             :param num_to_keep: number of recent versions to keep.
-
-        Returns:
-            When saving to a file, returns None.
         """
         if self.model_version is None:
             raise Exception("There isn't model_version, please fill this field")
@@ -137,10 +148,7 @@ class RecommenderPopular(RecommenderModel):
         }
 
         models = {
-            "POPULAR_MODEL": PopularModel(
-                popularity=self.recsys_config.POPULARITY_STRATEGY,
-                period=self.recsys_config.POPULARITY_PERIOD,
-            )
+            "EASE_MODEL": EASEModel(regularization=self.recsys_config.EASE_REGULARIZATION),
         }
 
         splitter = TimeRangeSplitter(

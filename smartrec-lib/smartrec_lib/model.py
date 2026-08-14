@@ -25,12 +25,55 @@ class ALSSettings(CommonRecommenderSettings):
     POPULARITY_STRATEGY: Literal["n_users", "n_interactions", "mean_weight", "sum_weight"] = "n_users"
     POPULARITY_PERIOD: Optional[timedelta] = timedelta(days=7)
 
+    # Session layer via co-visitation (off by default: prod behavior unchanged).
+    # When ON, the two ALS session paths are replaced per the offline research
+    # (EXPERIMENTS.md 2026-08-02/03): hot user + session -> RRF blend of ALS and
+    # CoVis (+6% map@10 vs pure ALS); unknown user + session -> CoVis (the ALS
+    # item-sim it replaces measured below plain popularity, covis is 4x).
+    SESSION_COVIS_ENABLED: bool = False
+    COVIS_TOP_K: int = 100
+    COVIS_MIN_COOC: int = 2
+    # "sw" variant (EXPERIMENTS.md 2026-08-04): seed recency is multiplied by
+    # the API event weight (view 1.0 / booking intent 2.0 / paid 3.0). Off by
+    # default: scoring is byte-identical to the unweighted covis.
+    COVIS_SESSION_WEIGHTS: bool = False
+    BLEND_ALS_WEIGHT: float = 1.0
+    BLEND_COVIS_WEIGHT: float = 1.0
+    BLEND_RRF_K: int = 60
+
 
 class LighFMSettings(CommonRecommenderSettings):
     RECOMMENDER_RANDOM_STATE: int = 42
     LIGHTFM_NO_COMPONENTS: int = 50
     LIGHTFM_LOSS: Literal["logistic", "warp", "bpr", "warp-kos"] = "bpr"
     LIGHTFM_EPOCHS: int = 1
+
+
+class EASESettings(CommonRecommenderSettings):
+    # Regularization for the closed-form item-item EASE model.
+    # 250 was the best value in offline k-fold sweeps (30-day training window).
+    # Warm ranker only: cold-user routing is handled by the orchestrator layer.
+    EASE_REGULARIZATION: float = 250.0
+
+
+class CoVisSettings(CommonRecommenderSettings):
+    # Item-item co-visitation from user baskets. Session-based ranker: scores
+    # candidates by co-occurrence with the items in the user's real-time history.
+    COVIS_TOP_K: int = 100  # neighbors kept per item
+    COVIS_MIN_COOC: int = 2  # minimum co-occurrence count to keep an edge
+    COVIS_SESSION_WEIGHTS: bool = False  # "sw": seed recency x API event weight
+
+
+class OrchestratorSettings(CommonRecommenderSettings):
+    # Composes the sub-model configs plus segment/global popularity knobs.
+    # One config drives building every component of the orchestrator.
+    ease: EASESettings = EASESettings()
+    covis: CoVisSettings = CoVisSettings()
+    POPULARITY_STRATEGY: Literal["n_users", "n_interactions", "mean_weight", "sum_weight"] = "n_users"
+    POPULARITY_PERIOD: Optional[timedelta] = timedelta(days=7)
+    # Item-metadata dimensions for cold segment popularity, most specific first.
+    SEGMENT_DIMS: List[str] = ["country", "region", "type"]
+    SEGMENT_TOP_N: int = 200
 
 
 class RandomSettings(CommonRecommenderSettings):
@@ -53,6 +96,10 @@ class Strategy(Enum):
     MODEL_REALTIME_HOT_USERS = "model_realtime_hot_users"  # Hot user + real-time events
     MODEL_REALTIME_WARM_USERS = "model_realtime_warm_users"  # New user with real-time events
     MODEL_REALTIME_COLD_USERS = "model_realtime_cold_users"  # Cold user with filtered popular by events
+
+    # ALS+CoVis artifact strategies (session layer replaced by co-visitation)
+    MODEL_ALS_COVIS_BLEND = "als_covis_blend"  # Hot user + session: RRF blend of ALS and CoVis
+    MODEL_COVIS_SESSION = "covis_session"  # Unknown user + session: CoVis (was ALS item-sim)
 
     # Fallback
     NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY = "no_strategy_items_to_recommend_filtered_is_empty"

@@ -48,4 +48,4 @@ def test_fit_popular():
     assert df_interactions.shape[0] == 100
     assert predictions.item_ids == ["3468", "434", "1217"]
     assert predictions.scores == [1.0, 1.0, 1.0]
-    assert predictions.strategy == Strategy.MODEL_HOT_AND_COLD_USERS.value
+    assert predictions.strategy == Strategy.MODEL_COLD_USERS.value
