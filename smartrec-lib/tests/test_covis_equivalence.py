@@ -1,14 +1,16 @@
-"""Characterisation tests for the two co-visitation implementations.
+"""Characterisation tests for the two co-visitation callers.
 
-`models/covis.py::CoVisModel` (rectools-native, used by `evaluation/`) and
+`research/covis.py::CoVisModel` (rectools-native, used by `evaluation/`) and
 `recommenders/recommender_covis.py::RecommenderCoVis` (serving, pickled into
-`covis_youtravel` and into the session layer of `als_covis_youtravel`) implement
-the same algorithm through different plumbing.
+`covis_youtravel` and into the session layer of `als_covis_youtravel`) now share
+one algorithm - `kernels/cooccurrence.py` - and differ only in the parameters
+they pass and in their id spaces (rectools internal ints vs external tour-id
+strings).
 
 This file is an executable spec of exactly where they agree and where they do
-not. It asserts nothing about which behaviour is preferable - it pins the facts
-so that any future unification can be checked against them, and so that drifting
-one implementation without the other fails loudly.
+not. It asserts nothing about which behaviour is preferable - it pins the facts,
+so that changing one caller's parameters without the other fails loudly. The
+kernel itself is tested directly in `test_kernels_cooccurrence.py`.
 
 Verdict recorded here (see docs/DESIGN_UNIFICATION.md section 1.4): the cores are
 equivalent; the divergences are the two research-only caps, the serving-only

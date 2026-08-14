@@ -1,8 +1,20 @@
 # Unifying the two model hierarchies in smartrec-lib
 
-Status: design proposal, no decision taken. Written on `chore/drop-dead-code`,
-on top of the three cleanup commits (orchestrator deleted, `ALSSettings` given
-nested composition, LightFM/Random/incremental-training removed).
+Status: **decided and implemented in part.** Option B (one algorithm, two thin
+shells) was taken: the co-visitation kernel now lives in
+`kernels/cooccurrence.py` and both callers go through it. Alongside it the
+library gained the layer model in [../../CLAUDE.md](../../CLAUDE.md), which is
+where the rules live now; `models/` and `policy/` became `research/`, and
+`policy/fusion.py` and `policy/constraints.py` moved to `kernels/` so that the
+research layer is no longer inside the Triton import closure. Option C
+(promoting `PolicyModel` to a serving citizen) remains **not** taken, for the
+structural reason in section 1.6.
+
+Paths and line numbers below are as they were when this analysis was written -
+before those moves - and are kept as the record of the reasoning. Written on
+`chore/drop-dead-code`, on top of the three cleanup commits (orchestrator
+deleted, `ALSSettings` given nested composition, LightFM/Random/incremental
+training removed).
 
 The complaint this document answers: composition is expressed twice, in two
 different idioms, and it is not obvious whether that can be collapsed into one.

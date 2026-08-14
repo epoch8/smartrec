@@ -46,14 +46,15 @@ Verify the rule at any time:
 ```bash
 python -c "
 import sys; import smartrec_lib.recommenders
-bad = [m for m in sys.modules if m.startswith(('smartrec_lib.policy','smartrec_lib.models','smartrec_lib.evaluation'))]
+bad = [m for m in sys.modules if m.startswith(('smartrec_lib.research','smartrec_lib.evaluation'))]
 print('research modules on serving path:', bad or 'none')"
 ```
 
 ## 3. Where does a new file go?
 
-This is the question that produced `covis_kernel.py` at the package root with no declared home.
-Answer it *before* writing the file.
+Answer it *before* writing the file. The table exists because a shared co-visitation kernel was
+once dropped at the package root with no declared home — not because extracting it was wrong, but
+because there was nowhere for it to go.
 
 | What you are adding | Where it goes | Constraints |
 |---|---|---|
@@ -69,11 +70,10 @@ first — do not resolve it by dropping a module at the package root.
 
 ## 4. Naming
 
-- **No new module named `model.py` or package named `models/`.** The repo currently has four
+- **No new module named `model.py` or package named `models/`.** There used to be four
   (`model.py`, `models/covis.py`, `policy/model.py`, `serving/model.py`), and
   `from smartrec_lib.model import CoVisSettings` vs `from smartrec_lib.models import CoVisModel`
-  differ by one character while meaning opposite things.
-- Exactly two of those names are *forced* and must stay:
+  differed by one character while meaning opposite things. Two remain, and both are *forced*:
   - `smartrec_lib/model.py` — its FQN is baked into every pickle in S3 (`smartrec_lib.model.ALSSettings`).
     It is the **contract** module despite the name. Do not add model classes to it.
   - `smartrec_lib/serving/model.py` — Triton's python backend loads a file by that exact name.

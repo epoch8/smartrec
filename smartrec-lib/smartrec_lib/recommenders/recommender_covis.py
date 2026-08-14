@@ -1,8 +1,8 @@
 """Layer: serving. Triton loads this module, its artifact goes to S3.
 
-May depend on `smartrec_lib.model` (settings, `Strategy`), `covis_kernel` and
-`save_and_load_triton_models`. Must NOT depend on `models/` or `policy/model.py`
-(research layer). `RecommenderCoVis` and `CoVisSettings` are reconstructed by
+Layer L2. May depend on `smartrec_lib.model` (settings, `Strategy`), `kernels/`
+and `save_and_load_triton_models`. Must NOT depend on `research/` or
+`evaluation/`. `RecommenderCoVis` and `CoVisSettings` are reconstructed by
 module path from pickles in S3, so neither may be renamed or moved.
 """
 
