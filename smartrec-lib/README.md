@@ -1,62 +1,87 @@
 # smartrec-lib
 
-Набор утилит для обучения и обслуживания рекомендательных моделей YouTravel. Библиотека построена поверх `rectools` и `implicit` и хранит общее API для тренировки, расчёта метрик и выгрузки моделей в Triton.
+Training and serving toolkit for recommendation models. Built on top of
+`rectools` and `implicit`, with a shared API for training, metrics, and
+exporting models to Triton.
 
-## Что реализовано
-- Базовый класс `RecommenderModel` с методами `train`, `recommend`, `calc_metrics`, сериализацией в `model.pkl` и загрузкой из локального каталога или S3/Triton.
-- Модели:
-  - `RecommenderALS` — основная прод-модель, с пересчётом item-similarity и вложенными подмоделями (Popular для холодных, опционально CoVis для сессии).
-  - `RecommenderPopular`, `RecommenderEASE`, `RecommenderCoVis` — модели с тем же единым интерфейсом.
-- Конфиги `ALSSettings`, `PopularSettings`, `EASESettings`, `CoVisSettings`, `BlendSettings` для явного задания гиперпараметров.
-- Модуль `save_and_load_triton_models` для загрузки/выгрузки весов в S3 и подготовки структуры Triton (`config.pbtxt`, `model.py`, очистка старых версий).
+The architecture contract — layers, frozen invariants, and where a new file
+belongs — is in [../CLAUDE.md](../CLAUDE.md). Read it before adding a module.
 
-## Быстрый старт
+## What's inside
+
+- **`RecommenderModel`** base class: `train`, `recommend`, `calc_metrics`, plus
+  (de)serialization to `model.pkl` from a local dir or S3 / Triton.
+- **Models:**
+  - `RecommenderALS` — main model (implicit ALS) with item-similarity, a nested
+    Popular sub-model for cold users, and an optional CoVis session layer.
+  - `RecommenderPopular`, `RecommenderEASE`, `RecommenderCoVis` — same interface.
+- **Config objects:** `ALSSettings`, `PopularSettings`, `EASESettings`,
+  `CoVisSettings`, `BlendSettings` — explicit hyperparameters.
+- **`save_and_load_triton_models`** — upload/download weights to S3 and prepare
+  the Triton layout (`config.pbtxt`, `model.py`, old-version cleanup).
+
+## How recommendations work
+
+`recommend()` returns items plus a `strategy` (see `Strategy` in `model.py`) that
+says how they were produced:
+
+- **hot** users (seen during training) → personalized ALS embeddings;
+- **cold** users (unknown) → popular-items fallback; **warm** users sit in between;
+- passing a real-time `history` of recent item IDs enriches the result on the fly
+  (`*_realtime_*` strategies) without retraining.
+
+In production the model runs inside Triton via the Python backend in
+`smartrec_lib/serving/` (`model.py` + `config.pbtxt`), which loads the exported
+`model.pkl`.
+
+There is no incremental fit: models are always retrained in full via
+`train(dataset)`.
+
+## Quick start
+
 ```python
+from datetime import datetime
+
 import pandas as pd
 from rectools.dataset import Dataset
 from smartrec_lib.model import ALSSettings
 from smartrec_lib.recommenders.recommender_als import RecommenderALS
 
-interactions = pd.DataFrame(
-    {
-        "user_id": [1, 1, 2],
-        "item_id": [10, 20, 30],
-        "weight": [1.0, 1.0, 1.0],
-        "datetime": pd.to_datetime(["2024-10-01", "2024-10-02", "2024-10-03"]),
-    }
-)
-dataset = Dataset.construct(interactions)
+interactions = pd.DataFrame({
+    "user_id": [1, 1, 2],
+    "item_id": [10, 20, 30],
+    "weight": [1.0, 1.0, 1.0],
+    "datetime": pd.to_datetime(["2024-10-01", "2024-10-02", "2024-10-03"]),
+})
+
 model = RecommenderALS(
     recsys_config=ALSSettings(
-        ALS_FACTORS=64,
-        ALS_ITERATIONS=15,
-        ALS_REGULARIZATION_FACTOR=0.05,
-        ALS_ALPHA=2,
+        ALS_FACTORS=64, ALS_ITERATIONS=15,
+        ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
     ),
-    model_name="als_youtravel",
-    model_version="20241024",
+    model_name="als_model",
+    model_version=datetime.now().strftime("%Y%m%d%H%M%S"),
 )
-model.train(dataset)
+model.train(Dataset.construct(interactions))
 recommendations = model.recommend(user_ids=1, top_n=10, filter_viewed=True)
 ```
-Инкрементального дообучения нет: модели переобучаются целиком через `train(dataset)`.
 
-## Выгрузка в Triton
+## Export to Triton
+
 ```python
 from pathy import Pathy
 
-model.save_model_triton(
-    base_s3_url=Pathy("s3://youtravel-recsys"),
-    num_to_keep=3,
-)
+model.save_model_triton(base_s3_url=Pathy("s3://recsys-models"), num_to_keep=3)
 ```
-Установите переменные окружения `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` и при необходимости `S3_ENDPOINT`, чтобы `fsspec` смог подключиться к бакету.
 
-## Тесты
-В каталоге `smartrec-lib/tests` лежат smoke-тесты для ALS и остальных моделей. Запуск:
+Set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` (and
+`S3_ENDPOINT` for Yandex Cloud) so `fsspec` can reach the bucket.
+
+## Tests
+
 ```bash
 cd app/smartrec/smartrec-lib
-uv run pytest tests
+uv run pytest
 ```
 
 ## Development: lint and format
