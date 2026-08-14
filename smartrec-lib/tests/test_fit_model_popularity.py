@@ -44,8 +44,17 @@ def test_fit_popular():
         top_n=3,
         filter_viewed=True,
     )
-    print(f"{predictions=}")
+    viewed = set(df_interactions.loc[df_interactions[Columns.User] == 1, Columns.Item].astype(str))
+    n_users = df_interactions.groupby(Columns.Item)[Columns.User].nunique()
+
     assert df_interactions.shape[0] == 100
-    assert predictions.item_ids == ["3468", "434", "1217"]
-    assert predictions.scores == [1.0, 1.0, 1.0]
     assert predictions.strategy == Strategy.MODEL_COLD_USERS.value
+    assert len(predictions.item_ids) == 3
+    # The fixture has 98 items tied at one user and exactly one (3105) with two,
+    # and 3105 sits in user 1's history, so filter_viewed drops it. What is
+    # determined is therefore: nothing viewed comes back, and everything
+    # returned belongs to the one-user tie group. Pinning a specific triple
+    # would pin an arbitrary slice of 98 equals - see CLAUDE.md section 8.
+    assert not viewed & set(predictions.item_ids)
+    assert all(n_users[int(item_id)] == 1 for item_id in predictions.item_ids)
+    assert predictions.scores == [1.0, 1.0, 1.0]
