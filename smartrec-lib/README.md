@@ -105,3 +105,9 @@ follow the rectools `ModelBase` contract, so configs, save/load and
 
 Legacy `recommenders/` stay untouched and keep serving production; migration is
 tracked in the parent repo (`app/docs/SMARTREC_V2_RESEARCH.md`).
+
+Having two hierarchies means the co-visitation algorithm exists twice
+(`models/covis.py` and `recommenders/recommender_covis.py`). Where the two agree
+and where they have drifted is pinned by `tests/test_covis_equivalence.py` and
+analysed, with unification options, in
+[docs/DESIGN_UNIFICATION.md](docs/DESIGN_UNIFICATION.md).
