@@ -120,12 +120,6 @@ class ALSSettings(CommonRecommenderSettings):
             )
 
 
-class LighFMSettings(CommonRecommenderSettings):
-    LIGHTFM_NO_COMPONENTS: int = 50
-    LIGHTFM_LOSS: Literal["logistic", "warp", "bpr", "warp-kos"] = "bpr"
-    LIGHTFM_EPOCHS: int = 1
-
-
 class EASESettings(CommonRecommenderSettings):
     # Regularization for the closed-form item-item EASE model.
     # 250 was the best value in offline k-fold sweeps (30-day training window).
@@ -133,15 +127,13 @@ class EASESettings(CommonRecommenderSettings):
     EASE_REGULARIZATION: float = 250.0
 
 
-class RandomSettings(CommonRecommenderSettings):
-    pass
-
-
 class Strategy(Enum):
     # Standard model-based strategies (trained on historical data)
     MODEL_HOT_USERS = "model_hot_users"  # User in training data, ALS embeddings
     MODEL_COLD_USERS = "model_cold_users"  # New user, popular items
     MODEL_WARM_USERS = "model_warm_users"
+    # No model emits this any more (its last emitter, RecommenderRandom, is gone).
+    # Kept because the string is a published contract - see api/docs/DEBUG_INFO_CODEC.md.
     MODEL_HOT_AND_COLD_USERS = "model_hot_and_cold_users"
 
     # Real-time strategies (enriched with session events from Redis)

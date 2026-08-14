@@ -1,13 +1,13 @@
 # smartrec-lib
 
-Набор утилит для обучения и обслуживания рекомендательных моделей YouTravel. Библиотека построена поверх `rectools`, `implicit`, `lightfm` и хранит общее API для тренировки, расчёта метрик и выгрузки моделей в Triton.
+Набор утилит для обучения и обслуживания рекомендательных моделей YouTravel. Библиотека построена поверх `rectools` и `implicit` и хранит общее API для тренировки, расчёта метрик и выгрузки моделей в Triton.
 
 ## Что реализовано
 - Базовый класс `RecommenderModel` с методами `train`, `recommend`, `calc_metrics`, сериализацией в `model.pkl` и загрузкой из локального каталога или S3/Triton.
 - Модели:
-  - `RecommenderALS` c поддержкой частичного дообучения (`train_partial`) и пересчётом item-similarity.
-  - `RecommenderLightFM`, `RecommenderPopular`, `RecommenderRandom` — простейшие baseline'ы с единым интерфейсом.
-- Конфиги `ALSSettings`, `LighFMSettings`, `PopularSettings`, `RandomSettings` для явного задания гиперпараметров.
+  - `RecommenderALS` — основная прод-модель, с пересчётом item-similarity и вложенными подмоделями (Popular для холодных, опционально CoVis для сессии).
+  - `RecommenderPopular`, `RecommenderEASE`, `RecommenderCoVis` — модели с тем же единым интерфейсом.
+- Конфиги `ALSSettings`, `PopularSettings`, `EASESettings`, `CoVisSettings`, `BlendSettings` для явного задания гиперпараметров.
 - Модуль `save_and_load_triton_models` для загрузки/выгрузки весов в S3 и подготовки структуры Triton (`config.pbtxt`, `model.py`, очистка старых версий).
 
 ## Быстрый старт
@@ -39,7 +39,7 @@ model = RecommenderALS(
 model.train(dataset)
 recommendations = model.recommend(user_ids=1, top_n=10, filter_viewed=True)
 ```
-Для инкрементального обновления передайте новый `Dataset` в `model.train_partial(...)`. Если найдены новые user/item ID, класс выполнит полный `fit`.
+Инкрементального дообучения нет: модели переобучаются целиком через `train(dataset)`.
 
 ## Выгрузка в Triton
 ```python
@@ -53,7 +53,7 @@ model.save_model_triton(
 Установите переменные окружения `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` и при необходимости `S3_ENDPOINT`, чтобы `fsspec` смог подключиться к бакету.
 
 ## Тесты
-В каталоге `smartrec-lib/tests` лежат smoke-тесты для ALS (включая `train_partial`). Запуск:
+В каталоге `smartrec-lib/tests` лежат smoke-тесты для ALS и остальных моделей. Запуск:
 ```bash
 cd app/smartrec/smartrec-lib
 uv run pytest tests

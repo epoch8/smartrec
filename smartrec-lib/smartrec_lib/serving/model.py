@@ -12,9 +12,7 @@ from smartrec_lib.recommenders import (
     RecommenderALS,
     RecommenderCoVis,
     RecommenderEASE,
-    RecommenderLightFM,
     RecommenderPopular,
-    RecommenderRandom,
 )
 
 # Явно настраиваем логгер на stdout — без этого логи не видны в kubectl logs
@@ -59,12 +57,9 @@ class TritonPythonModel:
     def _configure_python_logging_bridge() -> None:
         recommender_logger_names = (
             "ALS Model",
-            "LightFM Model",
             "Popular Model",
-            "Random Model",
             "EASE Model",
             "CoVis Model",
-            "Orchestrator Model",
             "Base Model",
             "ALS Model saving stage:",
         )
@@ -130,14 +125,10 @@ class TritonPythonModel:
         # branch overwrite it, serving an empty-neighbors RecommenderCoVis.
         if "als_covis" in model_name:
             self.model = RecommenderALS.load_model(load_dir=script_path)
-        elif "lightfm" in model_name:
-            self.model = RecommenderLightFM.load_model(load_dir=script_path)
         elif "als" in model_name:
             self.model = RecommenderALS.load_model(load_dir=script_path)
         elif "popular" in model_name:
             self.model = RecommenderPopular.load_model(load_dir=script_path)
-        elif "random" in model_name:
-            self.model = RecommenderRandom.load_model(load_dir=script_path)
         elif "ease" in model_name:
             self.model = RecommenderEASE.load_model(load_dir=script_path)
         elif "covis" in model_name:

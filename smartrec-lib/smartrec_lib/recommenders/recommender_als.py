@@ -209,15 +209,6 @@ class RecommenderALS(RecommenderModel):
 
         logger.info("Base models trained.")
 
-    def train_partial(self, dataset: Dataset, epochs: Optional[int] = None) -> None:
-        """Incremental (partial) training for ALS.
-
-        UNDER DEVELOPMENT - not available yet. Use train() for full retraining.
-        """
-        raise NotImplementedError(
-            "train_partial for ALS is under development and not available yet. " "Use train() for full retraining."
-        )
-
     def recommend(
         self,
         user_ids: int,
