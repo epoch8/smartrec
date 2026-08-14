@@ -52,7 +52,7 @@ class LighFMSettings(CommonRecommenderSettings):
 class EASESettings(CommonRecommenderSettings):
     # Regularization for the closed-form item-item EASE model.
     # 250 was the best value in offline k-fold sweeps (30-day training window).
-    # Warm ranker only: cold-user routing is handled by the orchestrator layer.
+    # Warm ranker only: cold-user routing is handled by the Popular fallback.
     EASE_REGULARIZATION: float = 250.0
 
 
@@ -64,16 +64,6 @@ class CoVisSettings(CommonRecommenderSettings):
     COVIS_SESSION_WEIGHTS: bool = False  # "sw": seed recency x API event weight
 
 
-class OrchestratorSettings(CommonRecommenderSettings):
-    # Composes the sub-model configs plus segment/global popularity knobs.
-    # One config drives building every component of the orchestrator.
-    ease: EASESettings = EASESettings()
-    covis: CoVisSettings = CoVisSettings()
-    POPULARITY_STRATEGY: Literal["n_users", "n_interactions", "mean_weight", "sum_weight"] = "n_users"
-    POPULARITY_PERIOD: Optional[timedelta] = timedelta(days=7)
-    # Item-metadata dimensions for cold segment popularity, most specific first.
-    SEGMENT_DIMS: List[str] = ["country", "region", "type"]
-    SEGMENT_TOP_N: int = 200
 
 
 class RandomSettings(CommonRecommenderSettings):

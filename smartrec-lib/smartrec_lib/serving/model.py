@@ -13,7 +13,6 @@ from smartrec_lib.recommenders import (
     RecommenderCoVis,
     RecommenderEASE,
     RecommenderLightFM,
-    RecommenderOrchestrator,
     RecommenderPopular,
     RecommenderRandom,
 )
@@ -129,9 +128,7 @@ class TritonPythonModel:
         # "als_covis_youtravel" MUST load as RecommenderALS (the covis session
         # layer lives inside it) - the old independent ifs let the bare covis
         # branch overwrite it, serving an empty-neighbors RecommenderCoVis.
-        if "orchestrator" in model_name:
-            self.model = RecommenderOrchestrator.load_model(load_dir=script_path)
-        elif "als_covis" in model_name:
+        if "als_covis" in model_name:
             self.model = RecommenderALS.load_model(load_dir=script_path)
         elif "lightfm" in model_name:
             self.model = RecommenderLightFM.load_model(load_dir=script_path)
@@ -232,14 +229,6 @@ class TritonPythonModel:
             else:
                 history = None
 
-            # Optional context (JSON string): country/region/type from the request
-            # filters. Only the orchestrator consumes it.
-            context = pb_utils.get_input_tensor_by_name(request, "context")
-            if context is not None and len(context.as_numpy()) > 0:
-                raw = context.as_numpy()[0].decode("utf-8")
-                context = json.loads(raw) if raw else None
-            else:
-                context = None
             parse_ms = (perf_counter() - parse_start) * 1000
 
             # ----- Вызов модели рекомендаций -----
@@ -251,9 +240,6 @@ class TritonPythonModel:
                 filter_viewed=filter_viewed,
                 history=history,
             )
-            # Other models' recommend() signatures do not accept context.
-            if isinstance(self.model, RecommenderOrchestrator):
-                recommend_kwargs["context"] = context
             recommendations = self.model.recommend(**recommend_kwargs)
             recommend_ms = (perf_counter() - recommend_start) * 1000
 
