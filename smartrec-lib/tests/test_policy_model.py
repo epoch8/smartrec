@@ -2,8 +2,8 @@ import pytest
 from rectools import Columns
 from rectools.models import PopularModel, model_from_config
 
-from smartrec_lib.models import CoVisModel
-from smartrec_lib.policy import PolicyModel
+from smartrec_lib.research import CoVisModel
+from smartrec_lib.research import PolicyModel
 
 ITEM_COUNTRY_LOCAL = {
     "m1": "maldives",
@@ -16,11 +16,11 @@ ITEM_COUNTRY_LOCAL = {
 }
 
 POLICY_CONFIG = {
-    "cls": "smartrec_lib.policy.model.PolicyModel",
+    "cls": "smartrec_lib.research.policy.PolicyModel",
     "sources": {
         "popular": {"model": {"cls": "PopularModel"}, "weight": 1.0},
         "covis": {
-            "model": {"cls": "smartrec_lib.models.covis.CoVisModel", "min_cooc": 2},
+            "model": {"cls": "smartrec_lib.research.covis.CoVisModel", "min_cooc": 2},
             "weight": 1.0,
             "is_session": True,
         },
@@ -84,7 +84,7 @@ def test_session_weight_zero_turns_covis_off(dataset):
     with_covis_off = model_from_config(config)
     with_covis_off.fit(dataset)
     popular_only_cfg = {
-        "cls": "smartrec_lib.policy.model.PolicyModel",
+        "cls": "smartrec_lib.research.policy.PolicyModel",
         "sources": {"popular": {"model": {"cls": "PopularModel"}, "weight": 1.0}},
         "fallback_source": "popular",
     }

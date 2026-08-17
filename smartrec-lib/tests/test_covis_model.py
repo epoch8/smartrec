@@ -2,7 +2,7 @@ import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
 from rectools.models import model_from_config
-from smartrec_lib.models import CoVisModel
+from smartrec_lib.research import CoVisModel
 
 
 def _internal(dataset, external_id):
@@ -114,4 +114,4 @@ def test_config_serializes_to_plain_dict():
     model = CoVisModel(top_k=7)
     simple = model.get_config(simple_types=True)
     assert simple["top_k"] == 7
-    assert simple["cls"] == "smartrec_lib.models.covis.CoVisModel"
+    assert simple["cls"] == "smartrec_lib.research.covis.CoVisModel"

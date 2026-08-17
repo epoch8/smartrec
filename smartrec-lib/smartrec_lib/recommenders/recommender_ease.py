@@ -16,7 +16,7 @@ from rectools.model_selection import TimeRangeSplitter, cross_validate
 from rectools.models import EASEModel
 
 from smartrec_lib.model import EASESettings, RecomItems, Strategy
-from smartrec_lib.recommenders import RecommenderModel
+from smartrec_lib.recommenders.base import RecommenderModel
 from smartrec_lib.save_and_load_triton_models import (
     clean_old_model_versions,
     upload_model_files,

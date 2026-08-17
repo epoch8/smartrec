@@ -32,12 +32,6 @@ input [
     optional: true
   },
   {
-    name: "context"
-    data_type: TYPE_STRING
-    dims: [ 1 ]
-    optional: true
-  },
-  {
     name: "top_n"
     data_type: TYPE_INT32
     dims: [ 1 ]

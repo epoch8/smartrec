@@ -5,7 +5,7 @@ import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
 
-from smartrec_lib.model import ALSSettings, Strategy
+from smartrec_lib.model import ALSSettings, PopularSettings, Strategy
 from smartrec_lib.recommenders import RecommenderALS
 
 recsys_config_als = ALSSettings(
@@ -15,8 +15,7 @@ recsys_config_als = ALSSettings(
     ALS_FACTORS=256,  # latent embeddings size
     ALS_ALPHA=50,  # confidence multiplier for non-zero entries in interactions
     RECOMMENDER_DAYS_THRESHOLD=14,
-    POPULARITY_STRATEGY="n_users",
-    POPULARITY_PERIOD=timedelta(days=1),
+    popular=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=1)),
 )
 
 test_data = Path(__file__).parent
@@ -44,14 +43,20 @@ def test_fit_als() -> None:
     # metrics = model.calc_metrics(k=10, dataset=train_dataset)
     model.train(train_dataset)
 
+    candidates = [3105, 1193, 3468, 434, 1217]
     predictions = model.recommend(
         user_ids=0,
         top_n=5,
         filter_viewed=True,
-        items_to_recommend=[3105, 1193, 3468, 434, 1217],
+        items_to_recommend=candidates,
     )
 
     assert df_interactions.shape[0] == 100
-    assert predictions.item_ids == ["3105", "1193", "3468", "434", "1217"]
-    assert predictions.scores == [2.0, 1.0, 1.0, 1.0, 1.0]
     assert predictions.strategy == Strategy.MODEL_COLD_USERS.value
+    # An unknown user gets the popularity fallback restricted to `candidates`,
+    # so the returned set is fully determined. Only 3105 has two users; the
+    # other four tie at one and their relative order is arbitrary - see
+    # CLAUDE.md section 8.
+    assert set(predictions.item_ids) == {str(item_id) for item_id in candidates}
+    assert predictions.item_ids[0] == "3105"
+    assert predictions.scores == [2.0, 1.0, 1.0, 1.0, 1.0]

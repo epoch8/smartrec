@@ -1,4 +1,4 @@
-from smartrec_lib.policy.fusion import rrf_fuse, session_weight
+from smartrec_lib.kernels.fusion import rrf_fuse, session_weight
 
 
 def test_single_source_preserves_order():

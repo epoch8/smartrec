@@ -1,14 +1,41 @@
+"""Layer L3: the serving policy expressed as a regular rectools model.
+
+Config lives here rather than in a separate module: it configures exactly one
+model and nothing else reads it, the same way `research/covis.py` colocates
+`CoVisModelConfig`.
+"""
+
 import typing as tp
 
 import typing_extensions as tpe
+from pydantic import BaseModel
 from rectools import Columns
 from rectools.dataset import Dataset
-from rectools.models.base import ModelBase
+from rectools.models.base import ModelBase, ModelConfig
 from rectools.models.serialization import model_from_config
 
-from smartrec_lib.policy.config import PolicyModelConfig, SourceSpec
-from smartrec_lib.policy.constraints import apply_share_cap
-from smartrec_lib.policy.fusion import rrf_fuse, session_weight
+from smartrec_lib.kernels.constraints import apply_share_cap
+from smartrec_lib.kernels.fusion import rrf_fuse, session_weight
+
+
+class SourceSpec(BaseModel):
+    """One candidate source: a rectools model config plus its fusion weight."""
+
+    model: tp.Dict[str, tp.Any]  # config for rectools model_from_config, incl. "cls"
+    weight: float = 1.0
+    is_session: bool = False  # session source: weight is additionally scaled by session_weight()
+
+
+class PolicyModelConfig(ModelConfig):
+    """Config for the candidate -> fuse -> constrain serving policy."""
+
+    sources: tp.Dict[str, SourceSpec] = {}
+    fallback_source: str = "popular"
+    rrf_k: int = 60
+    overfetch: int = 3  # each source is asked for k * overfetch candidates
+    category_feature: tp.Optional[str] = None  # item feature used by the share cap
+    category_share_cap: float = 1.0  # 1.0 disables the cap
+    session_weight_tiers: tp.List[tp.Tuple[int, float]] = [(1, 1.0)]
 
 
 class PolicyModel(ModelBase[PolicyModelConfig]):

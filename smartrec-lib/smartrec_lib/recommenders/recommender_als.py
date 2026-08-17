@@ -19,9 +19,9 @@ from rectools.model_selection import TimeRangeSplitter, cross_validate
 from rectools.models import ImplicitALSWrapperModel, PopularModel
 from scipy import sparse
 
-from smartrec_lib.model import ALSSettings, CoVisSettings, RecomItems, Strategy
-from smartrec_lib.policy.fusion import rrf_fuse
-from smartrec_lib.recommenders import RecommenderModel
+from smartrec_lib.model import ALSSettings, RecomItems, Strategy
+from smartrec_lib.kernels.fusion import rrf_fuse
+from smartrec_lib.recommenders.base import RecommenderModel
 from smartrec_lib.recommenders.recommender_covis import RecommenderCoVis
 from smartrec_lib.save_and_load_triton_models import (
     clean_old_model_versions,
@@ -55,7 +55,7 @@ class RecommenderALS(RecommenderModel):
         self.user_id_map: IdMap = None
         self.user_item_matrix_binary = None
         self.implicit_neginf_score = None
-        # Optional co-visitation session layer (SESSION_COVIS_ENABLED)
+        # Co-visitation session layer, trained iff recsys_config.covis is set
         self.covis: Optional[RecommenderCoVis] = None
 
     @classmethod
@@ -185,8 +185,8 @@ class RecommenderALS(RecommenderModel):
         self.item_similarity = self.compute_item_similarity(self.model_hot_users)
 
         self.model_cold_users = PopularModel(
-            popularity=self.recsys_config.POPULARITY_STRATEGY,
-            period=self.recsys_config.POPULARITY_PERIOD,
+            popularity=self.recsys_config.popular.POPULARITY_STRATEGY,
+            period=self.recsys_config.popular.POPULARITY_PERIOD,
         )
         self.model_cold_users.fit(dataset)
 
@@ -196,32 +196,18 @@ class RecommenderALS(RecommenderModel):
 
         # Optional co-visitation session layer: replaces the two weak item-sim
         # session paths (see _recommend_hot_user_with_covis_blend and the covis
-        # branch in recommend_unknown_user_with_history). Off by default.
+        # branch in recommend_unknown_user_with_history). Absent by default.
         self.covis = None
-        if getattr(self.recsys_config, "SESSION_COVIS_ENABLED", False):
-            covis_config = CoVisSettings(
-                RECOMMENDER_DAYS_THRESHOLD=self.recsys_config.RECOMMENDER_DAYS_THRESHOLD,
-                RECOMMENDER_RANDOM_STATE=self.recsys_config.RECOMMENDER_RANDOM_STATE,
-                COVIS_TOP_K=self.recsys_config.COVIS_TOP_K,
-                COVIS_MIN_COOC=self.recsys_config.COVIS_MIN_COOC,
-                COVIS_SESSION_WEIGHTS=getattr(self.recsys_config, "COVIS_SESSION_WEIGHTS", False),
-            )
+        if self.recsys_config.covis is not None:
             self.covis = RecommenderCoVis(
-                recsys_config=covis_config, model_name=self.model_name, model_version=self.model_version
+                recsys_config=self.recsys_config.covis,
+                model_name=self.model_name,
+                model_version=self.model_version,
             )
             self.covis.train(dataset)
-            logger.info("Session covis layer trained (SESSION_COVIS_ENABLED=True).")
+            logger.info("Session covis layer trained (recsys_config.covis is set).")
 
         logger.info("Base models trained.")
-
-    def train_partial(self, dataset: Dataset, epochs: Optional[int] = None) -> None:
-        """Incremental (partial) training for ALS.
-
-        UNDER DEVELOPMENT - not available yet. Use train() for full retraining.
-        """
-        raise NotImplementedError(
-            "train_partial for ALS is under development and not available yet. " "Use train() for full retraining."
-        )
 
     def recommend(
         self,
@@ -401,7 +387,7 @@ class RecommenderALS(RecommenderModel):
         users. Both sources are overfetched 2x so the rank fusion has real
         overlap to work with before the final cut to top_n.
         """
-        config = self.recsys_config
+        blend = self.recsys_config.blend
         fetch_n = top_n * 2
         covis_result = self.covis.recommend(
             user_ids,
@@ -428,11 +414,8 @@ class RecommenderALS(RecommenderModel):
 
         fused = rrf_fuse(
             {"als": als_list, "covis": list(covis_result.item_ids)},
-            {
-                "als": getattr(config, "BLEND_ALS_WEIGHT", 1.0),
-                "covis": getattr(config, "BLEND_COVIS_WEIGHT", 1.0),
-            },
-            rrf_k=getattr(config, "BLEND_RRF_K", 60),
+            {"als": blend.ALS_WEIGHT, "covis": blend.COVIS_WEIGHT},
+            rrf_k=blend.RRF_K,
         )
         # CoVis only filters its own session seed; drop training-viewed items so
         # filter_viewed semantics stay identical to the pure-ALS path.
@@ -469,7 +452,7 @@ class RecommenderALS(RecommenderModel):
         Returns:
             RecomItems with MODEL_REALTIME_HOT_USERS strategy
         """
-        # Covis session layer (SESSION_COVIS_ENABLED): replace the 70/30
+        # Covis session layer (recsys_config.covis): replace the 70/30
         # ALS + item-sim mix with the RRF blend of ALS and co-visitation -
         # the item-sim half measured below plain popularity offline
         # (EXPERIMENTS.md 2026-08-02/03).
@@ -612,7 +595,7 @@ class RecommenderALS(RecommenderModel):
         Returns:
             RecomItems object with item_ids, scores, and strategy
         """
-        # Covis session layer (SESSION_COVIS_ENABLED): co-visitation instead of
+        # Covis session layer (recsys_config.covis): co-visitation instead of
         # the ALS item-sim path, which measured below plain popularity offline
         # while covis was 4x better (EXPERIMENTS.md 2026-08-02).
         if self._session_covis_active():
@@ -841,8 +824,8 @@ class RecommenderALS(RecommenderModel):
                 fit_features_together=False,  # way to fit paired features
             ),
             "POPULARITY_MODEL": PopularModel(
-                popularity=self.recsys_config.POPULARITY_STRATEGY,
-                period=self.recsys_config.POPULARITY_PERIOD,
+                popularity=self.recsys_config.popular.POPULARITY_STRATEGY,
+                period=self.recsys_config.popular.POPULARITY_PERIOD,
             ),
         }
 

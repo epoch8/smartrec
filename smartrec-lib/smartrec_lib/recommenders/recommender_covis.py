@@ -1,14 +1,22 @@
+"""Layer: serving. Triton loads this module, its artifact goes to S3.
+
+Layer L2. May depend on `smartrec_lib.model` (settings, `Strategy`), `kernels/`
+and `save_and_load_triton_models`. Must NOT depend on `research/` or
+`evaluation/`. `RecommenderCoVis` and `CoVisSettings` are reconstructed by
+module path from pickles in S3, so neither may be renamed or moved.
+"""
+
 import logging
 from collections import defaultdict
-from itertools import combinations
 from typing import Any, Dict, List, Optional, Tuple
 
 from pathy import Pathy
 from rectools import Columns
 from rectools.dataset import Dataset
 
+from smartrec_lib.kernels.cooccurrence import build_neighbor_map, score_session
 from smartrec_lib.model import CoVisSettings, RecomItems, Strategy
-from smartrec_lib.recommenders import RecommenderModel
+from smartrec_lib.recommenders.base import RecommenderModel
 from smartrec_lib.save_and_load_triton_models import (
     clean_old_model_versions,
     upload_model_files,
@@ -84,7 +92,7 @@ class RecommenderCoVis(RecommenderModel):
 
         self.top_k = self.recsys_config.COVIS_TOP_K
         min_cooc = self.recsys_config.COVIS_MIN_COOC
-        self.session_weights_enabled = bool(getattr(self.recsys_config, "COVIS_SESSION_WEIGHTS", False))
+        self.session_weights_enabled = bool(self.recsys_config.COVIS_SESSION_WEIGHTS)
 
         logger.info("Building co-visitation matrix...")
         df = dataset.interactions.df
@@ -92,24 +100,22 @@ class RecommenderCoVis(RecommenderModel):
         users = dataset.user_id_map.convert_to_external(df[Columns.User].values)
         items = dataset.item_id_map.convert_to_external(df[Columns.Item].values)
 
-        baskets: Dict[Any, set] = defaultdict(set)
+        baskets: Dict[Any, List[str]] = defaultdict(list)
         for u, it in zip(users, items):
-            baskets[u].add(str(it))
+            baskets[u].append(str(it))
 
-        cooc: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        for basket in baskets.values():
-            if len(basket) < 2:
-                continue
-            for a, b in combinations(basket, 2):
-                cooc[a][b] += 1
-                cooc[b][a] += 1
-
-        self.neighbors = {}
-        for item, nb in cooc.items():
-            kept = [(n, float(c)) for n, c in nb.items() if c >= min_cooc]
-            kept.sort(key=lambda x: x[1], reverse=True)
-            if kept:
-                self.neighbors[item] = kept[: self.top_k]
+        self.neighbors = build_neighbor_map(
+            baskets.values(),
+            min_cooc=min_cooc,
+            top_k=self.top_k,
+            # No basket cap: the serving artifact has always paired a user's whole
+            # window. Bounding it would change every graph in S3.
+            fit_basket_size=None,
+            # B1 of docs/DESIGN_UNIFICATION.md is a pure refactor, so the historical
+            # hash-order tie-break stays. Flipping this to True is B2 and changes
+            # which equally-co-occurring neighbours survive top_k.
+            deterministic_ties=False,
+        )
 
         logger.info(
             f"Co-visitation matrix built. items_with_neighbors={len(self.neighbors)}, " f"baskets={len(baskets)}"
@@ -134,24 +140,21 @@ class RecommenderCoVis(RecommenderModel):
         # getattr: artifacts pickled before the flag existed lack the attribute.
         use_session_weights = getattr(self, "session_weights_enabled", False)
 
-        # Recency-weighted aggregation of neighbor scores. get_user_history returns
-        # most-recent-first, so earlier positions get a higher weight. With
-        # COVIS_SESSION_WEIGHTS on, the API event weight of the seed (view 1.0,
+        # With COVIS_SESSION_WEIGHTS on, the API event weight of the seed (view 1.0,
         # booking intent 2.0, paid 3.0) multiplies recency ("sw" variant,
         # EXPERIMENTS.md 2026-08-03/04).
-        scores: Dict[str, float] = defaultdict(float)
-        n = len(seed)
-        for pos, (item, seed_weight) in enumerate(seed):
-            recency = (n - pos) / n
-            mult = recency * (seed_weight if use_session_weights else 1.0)
-            for neighbor, w in self.neighbors.get(item, []):
-                if filter_viewed and neighbor in seen:
-                    continue
-                if allow is not None and neighbor not in allow:
-                    continue
-                scores[neighbor] += w * mult
-
-        ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
+        ranked = score_session(
+            self.neighbors,
+            [item for item, _ in seed],
+            k=top_n,
+            exclude=seen if filter_viewed else frozenset(),
+            allowed=allow,
+            # No seed cap: the whole history from the request is scored. Production
+            # relies on the Redis-side 50-item cap instead.
+            session_size=None,
+            seed_weights=[weight for _, weight in seed] if use_session_weights else None,
+            deterministic_ties=False,
+        )
 
         logger.info(f"CoVis for user {user_ids}: seed={len(seed)}, results={len(ranked)}")
 

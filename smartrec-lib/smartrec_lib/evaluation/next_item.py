@@ -6,7 +6,7 @@ from rectools.dataset import Dataset
 from rectools.metrics import MAP, Precision, Recall, calc_metrics
 from rectools.model_selection import TimeRangeSplitter
 
-from smartrec_lib.models.covis import CoVisModel
+from smartrec_lib.research.covis import CoVisModel
 
 # Most-recent-first external session items + k -> ranked external items.
 SessionScorer = tp.Callable[[tp.Sequence[tp.Any], int], tp.List[tp.Any]]
