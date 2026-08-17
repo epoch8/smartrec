@@ -426,7 +426,10 @@ class RecommenderALS(RecommenderModel):
             f"[ALS_COVIS BLEND] user={user_ids} | als={len(als_list)} covis={len(covis_result.item_ids)} "
             f"-> fused={len(items)}"
         )
-        return RecomItems(item_ids=items, scores=scores, strategy=Strategy.MODEL_ALS_COVIS_BLEND.value)
+        # Same segment and same signal as the ALS item-sim session path this
+        # replaces - a hot user scored with their live session - so it keeps that
+        # label. Which algorithm produced it is already told by model_name.
+        return RecomItems(item_ids=items, scores=scores, strategy=Strategy.MODEL_REALTIME_HOT_USERS.value)
 
     def _recommend_hot_user_with_session(
         self,
@@ -611,7 +614,11 @@ class RecommenderALS(RecommenderModel):
                 return RecomItems(
                     item_ids=list(covis_result.item_ids),
                     scores=list(covis_result.scores),
-                    strategy=Strategy.MODEL_COVIS_SESSION.value,
+                    # Unknown visitor scored from their live session - the same
+                    # segment and signal the item-sim path reported, so the same
+                    # label. Note RecommenderCoVis returns this value too, so the
+                    # standalone covis_youtravel artifact agrees.
+                    strategy=Strategy.MODEL_REALTIME_WARM_USERS.value,
                 )
             logger.info(f"[ALS SESSION->COVIS] covis empty, falling back to item-sim: user={user_ids}")
 

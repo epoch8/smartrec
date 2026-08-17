@@ -118,7 +118,14 @@ every change; they are enforced by this list.
    bucket, including ones that were not retrained.
 8. `Strategy` values are a published vocabulary mirrored by numeric id in
    `api/docs/DEBUG_INFO_CODEC.md`. Append-only; ids are never renumbered.
-   `MODEL_HOT_AND_COLD_USERS` has no emitter and stays anyway.
+   `MODEL_HOT_AND_COLD_USERS`, `MODEL_ALS_COVIS_BLEND` and `MODEL_COVIS_SESSION` have no emitter
+   and stay anyway.
+   **A strategy names the user segment and the signal used, never the algorithm.** Which artifact
+   answered — and therefore which algorithm — is already carried by `model_name` next to it. Adding
+   a strategy string for a new internal algorithm silently breaks every consumer watching for the
+   segment while telling them nothing new: `als_covis_blend`/`covis_session` did exactly that, and
+   the two ALS artifacts now both report `model_realtime_hot_users` / `model_realtime_warm_users`.
+   A/B readouts split on `model_name`.
    Watch the mixed convention: some paths return `Strategy.X`, others `Strategy.X.value`. Pydantic
    coerces both today; do not rely on it in new code — always return `.value`.
 9. Artifact names (`als_youtravel`, `popular_youtravel`, `covis_youtravel`, `als_covis_youtravel`)
