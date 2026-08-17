@@ -192,9 +192,11 @@ def test_legacy_artifact_loads_and_recommends_identically(dataset, tmp_path):
         assert got.item_ids == want.item_ids, case
         assert got.scores == want.scores, case
 
-    # And the blend path really did run off the migrated config.
+    # And the blend path really did run off the migrated config: the covis layer
+    # is present and the hot-plus-session request reports that segment.
+    assert loaded.covis is not None
     assert loaded.recommend("u1", top_n=3, filter_viewed=True, history=["m2", "m1"]).strategy == (
-        Strategy.MODEL_ALS_COVIS_BLEND.value
+        Strategy.MODEL_REALTIME_HOT_USERS.value
     )
 
 

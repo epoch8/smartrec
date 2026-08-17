@@ -128,6 +128,18 @@ class EASESettings(CommonRecommenderSettings):
 
 
 class Strategy(Enum):
+    """How a recommendation was produced, in terms of what was known about the
+    visitor - NOT which algorithm ran inside.
+
+    A strategy names the user segment and the signal used. Which artifact
+    answered, and therefore which algorithm, is already carried by `model_name`
+    alongside it, so the two together are unambiguous. Introducing a new strategy
+    string for a new internal algorithm is a mistake: it breaks every dashboard
+    and every consumer watching for the segment, and tells them nothing they
+    could not read off `model_name`. Add a value here only for a genuinely new
+    segment or signal.
+    """
+
     # Standard model-based strategies (trained on historical data)
     MODEL_HOT_USERS = "model_hot_users"  # User in training data, ALS embeddings
     MODEL_COLD_USERS = "model_cold_users"  # New user, popular items
@@ -136,14 +148,21 @@ class Strategy(Enum):
     # Kept because the string is a published contract - see api/docs/DEBUG_INFO_CODEC.md.
     MODEL_HOT_AND_COLD_USERS = "model_hot_and_cold_users"
 
-    # Real-time strategies (enriched with session events from Redis)
+    # Real-time strategies (enriched with session events from Redis). These are
+    # emitted whichever session algorithm the artifact uses: als_youtravel scores
+    # the session with ALS item-similarity, als_covis_youtravel with an RRF blend
+    # of ALS and co-visitation. Same segment, same signal, same label.
     MODEL_REALTIME_HOT_USERS = "model_realtime_hot_users"  # Hot user + real-time events
     MODEL_REALTIME_WARM_USERS = "model_realtime_warm_users"  # New user with real-time events
     MODEL_REALTIME_COLD_USERS = "model_realtime_cold_users"  # Cold user with filtered popular by events
 
-    # ALS+CoVis artifact strategies (session layer replaced by co-visitation)
-    MODEL_ALS_COVIS_BLEND = "als_covis_blend"  # Hot user + session: RRF blend of ALS and CoVis
-    MODEL_COVIS_SESSION = "covis_session"  # Unknown user + session: CoVis (was ALS item-sim)
+    # Retired, reserved. These briefly labelled the two als_covis session paths,
+    # which was the mistake described above: consumers waiting for
+    # model_realtime_* stopped seeing anything, while the strings carried only
+    # what model_name already said. Nothing emits them now; the values stay
+    # because their numeric ids in api/docs/DEBUG_INFO_CODEC.md are append-only.
+    MODEL_ALS_COVIS_BLEND = "als_covis_blend"
+    MODEL_COVIS_SESSION = "covis_session"
 
     # Fallback
     NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY = "no_strategy_items_to_recommend_filtered_is_empty"
