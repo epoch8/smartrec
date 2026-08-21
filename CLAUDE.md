@@ -37,6 +37,19 @@ Imports flow strictly downward. There are exactly four layers, and every module 
 | **L2 serving** | `recommenders/*`, artifact I/O, `serving/model.py` | L0, L1 | **Frozen paths, free bodies.** Module+class FQNs are load-bearing; logic inside them is not. |
 | **L3 research** | rectools-native models, policy, evaluation harnesses | L0, L1 | **Free.** Must never appear on the serving import path. |
 
+**Inside L2 there is one more direction, and it is just as strict: the composite may know its
+members; a member may never know the composite.** `RecommenderModelSet` owns the routing across
+visitor segments, the fusion of two rankings, and the entire `Strategy` vocabulary. A member
+(`RecommenderALS`, `RecommenderPopular`, `RecommenderCoVis`, `RecommenderEASE`) knows only its own
+algorithm: it answers `can_serve(user)` and returns candidates. It must not import a sibling, hold
+one as a field, read the set's config, or name a segment.
+
+This is not stylistic. Until 2026-08-22 `RecommenderALS` *was* the whole feed - it held a
+PopularModel for cold users, an optional `RecommenderCoVis` for sessions, the blend weights and the
+four-way routing - so "add a model" meant editing ALS, and `als_covis_youtravel` read as "the ALS
+artifact with extras" rather than as a set of models behind one name. Adding a member now touches
+`recommender_model_set.py` and `ModelSetSettings`, and no existing model at all.
+
 **L2 must not import L3.** This is the rule that is currently violated (§6), and the violation is
 not theoretical: an `ImportError` anywhere in `policy/` takes down inference for *all* models,
 including ones that have nothing to do with policy.
@@ -59,9 +72,10 @@ because there was nowhere for it to go.
 | What you are adding | Where it goes | Constraints |
 |---|---|---|
 | A pure function/algorithm shared by two callers | **L1** `kernels/<domain>.py` | No rectools, no pandas, no I/O, no settings objects. Takes primitives, returns primitives. Fully unit-testable without a `Dataset`. |
-| A new servable model | **L2** `recommenders/recommender_<name>.py` | Subclass `RecommenderModel`; implement `train`, `recommend`, `save_model_triton`, `calc_metrics`. Add to the `serving/model.py` name ladder, to `--models` in the trainer, to the Makefile runtime-env targets, and to `app/src/settings.py`. |
-| A knob for an existing model | **L0** a field on the matching `*Settings`, with a default | Adding a field is safe (old pickles skip validation); removing or renaming one needs `_migrate_legacy_flat_fields`. |
-| A new user segment / routing outcome | **L0** a new `Strategy` member, append-only | Coordinate with `api/docs/DEBUG_INFO_CODEC.md` — the numeric ids there are a published contract. |
+| A new ranker to put **inside** an existing artifact (a warm ranker, a content model for cold tours) | **L2** `recommenders/recommender_<name>.py`, plus a member field on `ModelSetSettings` and a branch in `RecommenderModelSet` | This is the common case and it touches **no existing model**. Implement `train`, `recommend`, `can_serve`, `calc_metrics`. Do not give it knowledge of its siblings or of `Strategy`. |
+| A whole new servable artifact (its own name in S3) | **L2** as above **and** `--models` in the trainer, the Makefile runtime-env targets, `app/src/settings.py`, the DAG | Almost always the wrong choice: a second artifact doubles the retrain, the bucket and the runtime env. Prefer a member of an existing set. |
+| A knob for an existing model | **L0** a field on the matching `*Settings`, with a default | Adding a field is safe (old pickles skip validation); removing or renaming one needs `_migrate_legacy_flat_fields`. Put it on the LEAF config of the model it configures, never on `ModelSetSettings` unless it is about composition. |
+| A new user segment / routing outcome | **L0** a new `Strategy` member, append-only, **and** a branch in `RecommenderModelSet.recommend` | Coordinate with `api/docs/DEBUG_INFO_CODEC.md` — the numeric ids there are a published contract. The routing table is the only place a segment is decided; no model may name one. |
 | An offline experiment, metric, or protocol | **L3** `research/` or `evaluation/` | May import rectools freely. Must not be imported by L2. |
 | A one-off analysis | Not here. The parent repo's `app/experiments/` | The library is not a scratchpad. |
 
@@ -89,32 +103,32 @@ every change; they are enforced by this list.
 
 **Pickle**
 
-1. The outer `Recommender*` class is *not* in the pickle (Triton picks it by artifact name), but
-   **every class reachable as a value inside `__dict__` is**, reconstructed by fully-qualified path:
+1. The outer class is *not* in the pickle — `serving/model.py` picks it — but **every class
+   reachable as a value inside `__dict__` is**, reconstructed by fully-qualified path:
    `smartrec_lib.model.{ModelSetSettings, ALSSettings, PopularSettings, CoVisSettings, BlendSettings,
-   EASESettings, CommonRecommenderSettings, Strategy}` and
-   `smartrec_lib.recommenders.recommender_covis.RecommenderCoVis`
-   (it lives inside the `als_covis_youtravel` artifact as `RecommenderALS.covis`).
-   Moving or renaming any of these makes existing artifacts unloadable on the next Triton poll —
-   without a deploy.
+   EASESettings, CommonRecommenderSettings, Strategy}` and, as members of a set,
+   `smartrec_lib.recommenders.{recommender_als.RecommenderALS, recommender_covis.RecommenderCoVis,
+   recommender_popular.RecommenderPopular}`. Moving or renaming any of these makes existing artifacts
+   unloadable on the next Triton poll — without a deploy.
 2. Instance attribute names are frozen per class. A rename is silent: the fresh `__init__` default
-   survives `__dict__.update()`. `RecommenderALS.covis = None` means `als_covis_youtravel` quietly
-   degrades to the old item-sim path with no error.
-3. Every `hasattr`/`getattr` shim in `recommender_als.py` and `recommender_covis.py` marks an
-   artifact shape that still exists in S3. Removing one produces a 100% request-time error rate on
-   that model, with a clean load.
-4. `recsys_config` is pickled inside the artifact, and **three shapes of it exist in S3**: flat
-   (`ALSSettings` with `POPULARITY_*`/`COVIS_*`/`BLEND_*` fields), nested (`ALSSettings` with
-   `popular`/`covis`/`blend` sub-configs) and current (`ModelSetSettings`). Two hooks handle that,
-   and they cover *field shape* only:
-   - `ALSSettings.__setstate__` rebuilds sub-configs from flat fields on unpickle;
-   - `RecommenderALS.model_set` normalises either legacy shape into a `ModelSetSettings`.
+   survives `__dict__.update()`. `RecommenderModelSet.session = None` means `als_covis_youtravel`
+   quietly serves without its session layer, and nothing errors.
+3. Every `hasattr`/`getattr` shim in the recommenders marks an artifact shape that still exists in
+   S3. Removing one produces a 100% request-time error rate on that model, with a clean load.
+4. **Two generations of artifact exist in the buckets, and both must serve.** The old one is a
+   `RecommenderALS` `__dict__` that carried every member itself (`model_cold_users`, `covis`) plus a
+   flat or nested `ALSSettings`. The current one is a `RecommenderModelSet` `__dict__` with `main` /
+   `fallback` / `session`. Three hooks, covering *shape* only:
+   - `ALSSettings.__setstate__` — rebuilds sub-configs from flat fields on unpickle;
+   - `ModelSetSettings.from_legacy_als_settings` — either legacy config shape into a model set config;
+   - `RecommenderModelSet.from_legacy_als_state` — a legacy ARTIFACT into a model set, member by
+     member, so there is exactly **one** routing path in the library rather than a second copy kept
+     alive for old pickles.
 
-   Read composition through `self.model_set`, never off `self.recsys_config` — the latter is an
-   `ALSSettings` on every artifact currently in the buckets, and the only composition field the
-   serving path touches is `blend`, so getting this wrong does not raise. It silently fuses with
-   default weights. Changing the base class of a settings object is covered by neither hook and
-   needs a `__reduce__` proven against a real prod pickle.
+   The equivalence is pinned by `test_legacy_artifact_loads_and_recommends_identically`, and it has
+   to be: a member assigned from the wrong key raises nothing and just serves worse. Delete all
+   three once both artifacts have been retrained twice. Changing the *base class* of a settings
+   object is covered by none of them and needs a `__reduce__` proven against a real prod pickle.
 5. Version directories must be `str.isdigit()` — otherwise they are invisible to both loading and
    retention cleanup.
 
@@ -136,14 +150,25 @@ every change; they are enforced by this list.
    segment while telling them nothing new: `als_covis_blend`/`covis_session` did exactly that, and
    the two ALS artifacts now both report `model_realtime_hot_users` / `model_realtime_warm_users`.
    A/B readouts split on `model_name`.
-   Watch the mixed convention: some paths return `Strategy.X`, others `Strategy.X.value`. Pydantic
-   coerces both today; do not rely on it in new code — always return `.value`.
+   **Only `RecommenderModelSet.recommend` sets a strategy.** Members report facts - "I used the
+   session", "nothing in the candidate list was scorable" - and the set names the segment from them.
+   A member that labels its own answer will eventually lie: a hot user whose session seeds are all
+   unknown to the models gets a plain ALS ranking, and calling that `model_realtime_hot_users`
+   silently corrupts every A/B split on strategy. That regression was caught by
+   `test_hot_user_ignores_history` during the 2026-08-22 refactor, which is why the session methods
+   return `(RecomItems, session_used)` instead of a strategy.
+   Always emit `.value`, never the enum member.
 9. Artifact names (`als_youtravel`, `popular_youtravel`, `covis_youtravel`, `als_covis_youtravel`)
    are consumed as a *public query parameter* (`model_name` on the feed endpoint), as API defaults,
    and as Makefile runtime-env paths. Never rename, never reuse a name for a different model.
-10. `serving/model.py` resolves the class from the artifact name by an **ordered substring ladder**.
-    Most specific first: `als_covis` must match before `covis`. Getting this wrong once already
-    served empty feeds.
+10. `serving/model.py` resolves the class **from the pickle's shape first, and only then from the
+    artifact name.** The name cannot distinguish the two generations: `als_covis_youtravel` is a
+    `RecommenderALS` dict in the buckets today and a `RecommenderModelSet` dict after the next
+    retrain, under the same name (§5.9 forbids renaming it). Members present → model set; a
+    `model_hot_users` key → legacy artifact, adapted; otherwise the name ladder.
+    The ladder stays an **ordered** elif chain, most specific first: `als_covis` must match before
+    `covis`. Getting that wrong once already served empty feeds. Pinned by `test_serving_loader.py`,
+    which stubs Triton's backend utils so the real `_load_model` can be tested off-cluster.
 
 **Deploy ordering**
 
@@ -177,9 +202,12 @@ co-occurrence (`covis_kernel.py` → `kernels/cooccurrence.py`, with `research/c
 it); the `model.py` / `models/` collision (`models/` and `policy/` → `research/`, leaving only the
 two forced `model.py` files); and the `recommenders/` package import cycle.
 
-Fixed on 2026-08-22: composition moved off `ALSSettings` into `ModelSetSettings`, so the config of
-one ranker no longer declares who serves cold users and how two rankers are fused. `ALSSettings` is
-a leaf again. The cost is the shim in §5.4, removable after two retrain cycles.
+Fixed on 2026-08-22, in two steps that belong together. First the config: composition moved off
+`ALSSettings` into `ModelSetSettings`, so one ranker's config no longer declares who serves cold
+users. Then the code, which was the half that mattered: `RecommenderModelSet` took over routing,
+fusion and the `Strategy` vocabulary, and `RecommenderALS` became a member that knows nothing about
+its siblings or about segments. The cost is the three legacy hooks in §5.4, removable after two
+retrain cycles.
 
 Still open:
 
@@ -187,13 +215,16 @@ Still open:
    handling; a 19-line block is byte-identical twice inside `recommender_als.py`; `calc_metrics`
    repeats the same CV preset in three recommenders with a metric set that disagrees with
    `evaluation/warm_cv.py`; `evaluation/next_item.py` reimplements rectools' `PopularModel` by hand
-   with a hard-coded 14-day window.
+   with a hard-coded 14-day window. That CV preset is the obvious next extraction now that
+   `RecommenderModelSet.calc_metrics` just fans out to its members.
 2. **Six different id-conversion policies** across the package (`str()` vs native, strict vs
    lenient). This is why the equivalence test has to reproject an entire graph before comparing.
 3. **`RECOMMENDER_DAYS_THRESHOLD`** is declared on four settings classes and read zero times inside
    the library — only the trainer reads it.
-4. **`serving/model.py` reaches into private ALS methods** (`_ensure_lookup_caches`,
-   `_ensure_user_item_matrix_binary`) behind a `hasattr` guard.
+4. **A `RecomItems.strategy` of `None` is legal on the wire between a member and the set**, because
+   members no longer label their own answers. Nothing outside the library ever sees it - the set
+   always stamps a value - but the field is still typed `Optional[str]`, so a future member returned
+   straight to Triton would emit a null strategy. Tighten it when the legacy hooks go.
 
 ## 7. Checklist
 

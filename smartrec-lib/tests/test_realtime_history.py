@@ -12,7 +12,7 @@ from rectools import Columns
 from rectools.dataset import Dataset
 
 from smartrec_lib.model import ALSSettings, ModelSetSettings, Strategy
-from smartrec_lib.recommenders.recommender_als import RecommenderALS
+from smartrec_lib.recommenders import RecommenderModelSet
 
 
 @pytest.fixture
@@ -47,7 +47,7 @@ def trained_model(dataset):
         )
     )
 
-    model = RecommenderALS(
+    model = RecommenderModelSet(
         recsys_config=config,
         model_name="test_als",
         model_version="test_v1",
@@ -496,7 +496,7 @@ if __name__ == "__main__":
         )
     )
 
-    model = RecommenderALS(
+    model = RecommenderModelSet(
         recsys_config=config,
         model_name="test_als",
         model_version="test_v1",

@@ -6,7 +6,7 @@ relevant neighbor counts are: m1 -> m2(2), pop1(2); t1 -> t2(2), pop1(2).
 """
 
 from smartrec_lib.model import ALSSettings, CoVisSettings, ModelSetSettings
-from smartrec_lib.recommenders import RecommenderALS, RecommenderCoVis
+from smartrec_lib.recommenders import RecommenderModelSet, RecommenderCoVis
 
 
 def _fitted_covis(dataset, **overrides):
@@ -65,7 +65,7 @@ def test_als_covis_layer_inherits_the_flag(dataset):
         ),
         covis=CoVisSettings(COVIS_MIN_COOC=2, COVIS_SESSION_WEIGHTS=True),
     )
-    model = RecommenderALS(recsys_config=config, model_name="als_test", model_version="1")
+    model = RecommenderModelSet(recsys_config=config, model_name="als_test", model_version="1")
     model.train(dataset)
-    assert model.covis is not None
-    assert model.covis.session_weights_enabled is True
+    assert model.session is not None
+    assert model.session.session_weights_enabled is True

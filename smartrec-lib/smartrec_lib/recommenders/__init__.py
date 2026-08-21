@@ -14,9 +14,13 @@ from smartrec_lib.recommenders.recommender_als import RecommenderALS
 from smartrec_lib.recommenders.recommender_covis import RecommenderCoVis
 from smartrec_lib.recommenders.recommender_ease import RecommenderEASE
 from smartrec_lib.recommenders.recommender_popular import RecommenderPopular
+from smartrec_lib.recommenders.recommender_model_set import RecommenderModelSet
 
 __all__ = [
     "RecommenderModel",
+    # The composite: what an artifact actually is. Routing and Strategy live
+    # here; the models below are its members and know nothing about each other.
+    "RecommenderModelSet",
     "RecommenderALS",
     "RecommenderCoVis",
     "RecommenderEASE",

@@ -5,7 +5,7 @@ m1-m3), turkey cluster (u4-u6, t1-t3), globally popular pop1.
 """
 
 from smartrec_lib.model import ALSSettings, CoVisSettings, ModelSetSettings, Strategy
-from smartrec_lib.recommenders import RecommenderALS
+from smartrec_lib.recommenders import RecommenderModelSet
 
 BASE_ALS = dict(
     ALS_ITERATIONS=2,
@@ -19,7 +19,7 @@ BASE_ALS = dict(
 def _fitted(dataset, **overrides):
     """Overrides apply to the model set (covis=, blend=), not to the ALS ranker."""
     config = ModelSetSettings(als=ALSSettings(**BASE_ALS), **overrides)
-    model = RecommenderALS(recsys_config=config, model_name="als_test", model_version="1")
+    model = RecommenderModelSet(recsys_config=config, model_name="als_test", model_version="1")
     model.train(dataset)
     return model
 
@@ -35,8 +35,8 @@ def test_no_covis_config_hot_user_with_session_keeps_realtime_strategy(dataset):
 
 def test_no_covis_config_trains_no_covis_layer(dataset):
     model = _fitted(dataset)
-    assert model.model_set.covis is None
-    assert model.covis is None
+    assert model.recsys_config.covis is None
+    assert model.session is None
 
 
 # --- covis sub-config present: session paths replaced by covis ----------------

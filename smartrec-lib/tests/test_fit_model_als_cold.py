@@ -6,7 +6,7 @@ from rectools import Columns
 from rectools.dataset import Dataset
 
 from smartrec_lib.model import ALSSettings, ModelSetSettings, PopularSettings, Strategy
-from smartrec_lib.recommenders import RecommenderALS
+from smartrec_lib.recommenders import RecommenderModelSet
 
 recsys_config_als = ModelSetSettings(
     als=ALSSettings(
@@ -36,7 +36,7 @@ def test_fit_als() -> None:
 
     model_name = "als_test_model"
     model_version = str(int(datetime.now().timestamp()))
-    model = RecommenderALS(
+    model = RecommenderModelSet(
         model_name=model_name,
         model_version=model_version,
         recsys_config=recsys_config_als,
