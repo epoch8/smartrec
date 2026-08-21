@@ -28,7 +28,7 @@ from datetime import datetime
 
 import pandas as pd
 from rectools.dataset import Dataset
-from smartrec_lib.model import ALSSettings
+from smartrec_lib.model import ALSSettings, ModelSetSettings
 from smartrec_lib.recommenders.recommender_als import RecommenderALS
 
 interactions = pd.DataFrame({
@@ -39,9 +39,11 @@ interactions = pd.DataFrame({
 })
 
 model = RecommenderALS(
-    recsys_config=ALSSettings(
-        ALS_FACTORS=64, ALS_ITERATIONS=15,
-        ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
+    recsys_config=ModelSetSettings(
+        als=ALSSettings(
+            ALS_FACTORS=64, ALS_ITERATIONS=15,
+            ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
+        ),
     ),
     model_name="als_model",
     model_version=datetime.now().strftime("%Y%m%d%H%M%S"),

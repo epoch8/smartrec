@@ -56,13 +56,15 @@ _LEGACY_ALS_BLEND_FIELDS = {
 
 
 class ALSSettings(CommonRecommenderSettings):
-    """Config for RecommenderALS, which is a model set rather than one model.
+    """Hyperparameters of the ALS matrix-factorisation ranker. Nothing else.
 
-    Composition is explicit: `popular` configures the PopularModel that serves
-    cold users, and `covis` configures the optional co-visitation session layer.
-    `covis is None` means there is no session layer at all - that is what the
-    old SESSION_COVIS_ENABLED=False meant. `blend` is only read when `covis` is
-    set (it fuses the ALS and CoVis candidate lists for hot users in session).
+    This class used to also carry `popular`, `covis` and `blend`, i.e. the
+    composition of the whole artifact, which put "who serves cold users" and
+    "how are two rankers fused" inside the config of one ranker. Composition
+    now lives in `ModelSetSettings`; this stays a leaf config.
+
+    The `__setstate__` below is the one reason the old names still appear here:
+    artifacts in S3 were pickled with that shape and must keep loading.
     """
 
     ALS_ITERATIONS: int
@@ -70,25 +72,20 @@ class ALSSettings(CommonRecommenderSettings):
     ALS_FACTORS: int  # latent embeddings size
     ALS_ALPHA: int  # confidence multiplier for non-zero entries in interactions
 
-    # Cold-user fallback embedded in the ALS artifact.
-    popular: PopularSettings = Field(default_factory=PopularSettings)
-    # Session layer via co-visitation (absent by default: prod behavior unchanged).
-    # When present, the two ALS session paths are replaced per the offline research
-    # (EXPERIMENTS.md 2026-08-02/03): hot user + session -> RRF blend of ALS and
-    # CoVis (+6% map@10 vs pure ALS); unknown user + session -> CoVis (the ALS
-    # item-sim it replaces measured below plain popularity, covis is 4x).
-    covis: Optional[CoVisSettings] = None
-    blend: BlendSettings = Field(default_factory=BlendSettings)
-
     def __setstate__(self, state: Dict[str, Any]) -> None:
-        """Load artifacts pickled with the pre-composition (flat) field shape.
+        """Normalise artifacts pickled with the flat, pre-composition shape.
 
         `recsys_config` is pickled inside every model.pkl in S3, so a 900MB
-        artifact trained before this refactor still unpickles into this class.
-        Pickle restores __dict__ verbatim and skips validation, so the nested
+        artifact trained before composition existed still unpickles into this
+        class. Pickle restores __dict__ verbatim and skips validation, so its
         sub-configs would simply be missing; rebuild them from the flat fields.
-        The stale flat keys are left in __dict__ so any straggler reader of
-        e.g. config.POPULARITY_STRATEGY keeps working.
+
+        They land in __dict__ under names this class no longer declares, which
+        is deliberate and is what `ModelSetSettings.from_legacy_als_settings`
+        reads. Pydantic resolves __dict__ entries for undeclared names, so
+        `config.covis` on such an instance still works. The stale flat keys are
+        left alone so any straggler reader of e.g. `config.POPULARITY_STRATEGY`
+        keeps working.
         """
         super().__setstate__(state)
         self._migrate_legacy_flat_fields()
@@ -118,6 +115,63 @@ class ALSSettings(CommonRecommenderSettings):
             fields["blend"] = BlendSettings(
                 **{new: fields[old] for old, new in _LEGACY_ALS_BLEND_FIELDS.items() if old in fields}
             )
+
+
+class ModelSetSettings(BaseModel):
+    """One servable artifact composed of several models.
+
+    An artifact is not one model: it is a main ranker, a fallback for users the
+    ranker cannot score, and optionally a session layer, plus the weights used
+    to fuse them. That shape belongs here rather than on the main ranker's own
+    config, where it lived until 2026-08-22 - `ALSSettings.covis` read as "a
+    hyperparameter of ALS", which it never was.
+
+    - `als` - the main ranker. Serves hot users.
+    - `popular` - the fallback. Serves cold users, always present.
+    - `covis` - the session layer, optional. `None` means the artifact has no
+      session layer, which is exactly what the retired `SESSION_COVIS_ENABLED=False`
+      meant; the two ALS session paths then fall back to item similarity.
+    - `blend` - fusion weights, read only when `covis` is set: hot user with a
+      live session gets an RRF blend of ALS and CoVis.
+
+    The two shipped artifacts are the two shapes of this class: `als_youtravel`
+    is als+popular, `als_covis_youtravel` is als+popular+covis+blend. Per the
+    offline research (EXPERIMENTS.md 2026-08-02/03) the blend beat pure ALS by
+    ~6% map@10, and CoVis beat the ALS item-sim path it replaces by 4x.
+
+    Plain BaseModel, not BaseSettings: composition is not env-driven, and this
+    is constructed on the serving path for legacy artifacts, where scanning the
+    environment on every request would be a waste.
+    """
+
+    als: ALSSettings
+    popular: PopularSettings = Field(default_factory=PopularSettings)
+    covis: Optional[CoVisSettings] = None
+    blend: BlendSettings = Field(default_factory=BlendSettings)
+
+    @classmethod
+    def from_legacy_als_settings(cls, config: ALSSettings) -> "ModelSetSettings":
+        """Read an artifact pickled while composition still lived on ALSSettings.
+
+        Covers both older shapes: the flat one (`__setstate__` above has already
+        rebuilt the sub-configs by the time we get here) and the nested one that
+        `als_covis_youtravel` carries today. Reads `__dict__` directly because
+        after the split these names are no longer declared fields.
+        """
+        fields = config.__dict__
+        return cls(
+            als=ALSSettings(
+                RECOMMENDER_DAYS_THRESHOLD=fields.get("RECOMMENDER_DAYS_THRESHOLD", 7),
+                RECOMMENDER_RANDOM_STATE=fields.get("RECOMMENDER_RANDOM_STATE", 42),
+                ALS_ITERATIONS=fields["ALS_ITERATIONS"],
+                ALS_REGULARIZATION_FACTOR=fields["ALS_REGULARIZATION_FACTOR"],
+                ALS_FACTORS=fields["ALS_FACTORS"],
+                ALS_ALPHA=fields["ALS_ALPHA"],
+            ),
+            popular=fields.get("popular") or PopularSettings(),
+            covis=fields.get("covis"),
+            blend=fields.get("blend") or BlendSettings(),
+        )
 
 
 class EASESettings(CommonRecommenderSettings):

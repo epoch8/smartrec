@@ -19,7 +19,7 @@ from rectools.model_selection import TimeRangeSplitter, cross_validate
 from rectools.models import ImplicitALSWrapperModel, PopularModel
 from scipy import sparse
 
-from smartrec_lib.model import ALSSettings, RecomItems, Strategy
+from smartrec_lib.model import ModelSetSettings, RecomItems, Strategy
 from smartrec_lib.kernels.fusion import rrf_fuse
 from smartrec_lib.recommenders.base import RecommenderModel
 from smartrec_lib.recommenders.recommender_covis import RecommenderCoVis
@@ -37,7 +37,7 @@ class RecommenderALS(RecommenderModel):
 
     def __init__(
         self,
-        recsys_config: Optional[ALSSettings] = None,
+        recsys_config: Optional[ModelSetSettings] = None,
         model_name: Optional[str] = None,
         model_version: Optional[str] = None,
     ) -> None:
@@ -55,8 +55,24 @@ class RecommenderALS(RecommenderModel):
         self.user_id_map: IdMap = None
         self.user_item_matrix_binary = None
         self.implicit_neginf_score = None
-        # Co-visitation session layer, trained iff recsys_config.covis is set
+        # Co-visitation session layer, trained iff the model set declares covis
         self.covis: Optional[RecommenderCoVis] = None
+
+    @property
+    def model_set(self) -> ModelSetSettings:
+        """Composition of this artifact, normalised across config shapes.
+
+        Every artifact in S3 was pickled when `recsys_config` was an ALSSettings
+        that carried `popular`/`covis`/`blend` itself, and Triton keeps loading
+        those pickles. At serving time the only composition field read is
+        `blend`, so without this shim nothing would raise - the blend would
+        quietly run with default weights instead of the trained ones. Drop the
+        legacy branch once both ALS artifacts have been retrained twice.
+        """
+        config = self.recsys_config
+        if isinstance(config, ModelSetSettings):
+            return config
+        return ModelSetSettings.from_legacy_als_settings(config)
 
     @classmethod
     def compute_item_similarity(cls, model: ImplicitALSWrapperModel, k_max_values: int = 100) -> np.ndarray:
@@ -164,18 +180,20 @@ class RecommenderALS(RecommenderModel):
         assert self.recsys_config is not None
 
         self.dataset = dataset
+        model_set = self.model_set
+        als = model_set.als
 
         logger.info("Fitting model...")
 
-        np.random.seed(self.recsys_config.RECOMMENDER_RANDOM_STATE)
+        np.random.seed(als.RECOMMENDER_RANDOM_STATE)
 
         self.model_hot_users = ImplicitALSWrapperModel(
             AlternatingLeastSquares(
-                factors=self.recsys_config.ALS_FACTORS,
-                regularization=self.recsys_config.ALS_REGULARIZATION_FACTOR,
-                iterations=self.recsys_config.ALS_ITERATIONS,
-                alpha=self.recsys_config.ALS_ALPHA,
-                random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE,
+                factors=als.ALS_FACTORS,
+                regularization=als.ALS_REGULARIZATION_FACTOR,
+                iterations=als.ALS_ITERATIONS,
+                alpha=als.ALS_ALPHA,
+                random_state=als.RECOMMENDER_RANDOM_STATE,
             ),
             fit_features_together=False,  # way to fit paired features
         )
@@ -185,8 +203,8 @@ class RecommenderALS(RecommenderModel):
         self.item_similarity = self.compute_item_similarity(self.model_hot_users)
 
         self.model_cold_users = PopularModel(
-            popularity=self.recsys_config.popular.POPULARITY_STRATEGY,
-            period=self.recsys_config.popular.POPULARITY_PERIOD,
+            popularity=model_set.popular.POPULARITY_STRATEGY,
+            period=model_set.popular.POPULARITY_PERIOD,
         )
         self.model_cold_users.fit(dataset)
 
@@ -198,14 +216,14 @@ class RecommenderALS(RecommenderModel):
         # session paths (see _recommend_hot_user_with_covis_blend and the covis
         # branch in recommend_unknown_user_with_history). Absent by default.
         self.covis = None
-        if self.recsys_config.covis is not None:
+        if model_set.covis is not None:
             self.covis = RecommenderCoVis(
-                recsys_config=self.recsys_config.covis,
+                recsys_config=model_set.covis,
                 model_name=self.model_name,
                 model_version=self.model_version,
             )
             self.covis.train(dataset)
-            logger.info("Session covis layer trained (recsys_config.covis is set).")
+            logger.info("Session covis layer trained (the model set declares covis).")
 
         logger.info("Base models trained.")
 
@@ -387,7 +405,7 @@ class RecommenderALS(RecommenderModel):
         users. Both sources are overfetched 2x so the rank fusion has real
         overlap to work with before the final cut to top_n.
         """
-        blend = self.recsys_config.blend
+        blend = self.model_set.blend
         fetch_n = top_n * 2
         covis_result = self.covis.recommend(
             user_ids,
@@ -455,7 +473,7 @@ class RecommenderALS(RecommenderModel):
         Returns:
             RecomItems with MODEL_REALTIME_HOT_USERS strategy
         """
-        # Covis session layer (recsys_config.covis): replace the 70/30
+        # Covis session layer (ModelSetSettings.covis): replace the 70/30
         # ALS + item-sim mix with the RRF blend of ALS and co-visitation -
         # the item-sim half measured below plain popularity offline
         # (EXPERIMENTS.md 2026-08-02/03).
@@ -598,7 +616,7 @@ class RecommenderALS(RecommenderModel):
         Returns:
             RecomItems object with item_ids, scores, and strategy
         """
-        # Covis session layer (recsys_config.covis): co-visitation instead of
+        # Covis session layer (ModelSetSettings.covis): co-visitation instead of
         # the ALS item-sim path, which measured below plain popularity offline
         # while covis was 4x better (EXPERIMENTS.md 2026-08-02).
         if self._session_covis_active():
@@ -809,6 +827,8 @@ class RecommenderALS(RecommenderModel):
 
     def calc_metrics(self, k: int, dataset: Dataset, n_splits: int = 3) -> Dict[str, Any]:
         assert self.recsys_config is not None
+        model_set = self.model_set
+        als = model_set.als
 
         metrics = {
             f"serendipity@{k}": Serendipity(k=k),
@@ -822,17 +842,17 @@ class RecommenderALS(RecommenderModel):
         models = {
             "ALS_MODEL": ImplicitALSWrapperModel(
                 AlternatingLeastSquares(
-                    factors=self.recsys_config.ALS_FACTORS,
-                    regularization=self.recsys_config.ALS_REGULARIZATION_FACTOR,
-                    iterations=self.recsys_config.ALS_ITERATIONS,
-                    alpha=self.recsys_config.ALS_ALPHA,
-                    random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE,
+                    factors=als.ALS_FACTORS,
+                    regularization=als.ALS_REGULARIZATION_FACTOR,
+                    iterations=als.ALS_ITERATIONS,
+                    alpha=als.ALS_ALPHA,
+                    random_state=als.RECOMMENDER_RANDOM_STATE,
                 ),
                 fit_features_together=False,  # way to fit paired features
             ),
             "POPULARITY_MODEL": PopularModel(
-                popularity=self.recsys_config.popular.POPULARITY_STRATEGY,
-                period=self.recsys_config.popular.POPULARITY_PERIOD,
+                popularity=model_set.popular.POPULARITY_STRATEGY,
+                period=model_set.popular.POPULARITY_PERIOD,
             ),
         }
 

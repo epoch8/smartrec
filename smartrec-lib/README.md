@@ -15,7 +15,8 @@ belongs — is in [../CLAUDE.md](../CLAUDE.md). Read it before adding a module.
   - `RecommenderALS` — main model (implicit ALS) with item-similarity, a nested
     Popular sub-model for cold users, and an optional CoVis session layer.
   - `RecommenderPopular`, `RecommenderEASE`, `RecommenderCoVis` — same interface.
-- **Config objects:** `ALSSettings`, `PopularSettings`, `EASESettings`,
+- **Config objects:** `ModelSetSettings` (composition of one artifact),
+  `ALSSettings`, `PopularSettings`, `EASESettings`,
   `CoVisSettings`, `BlendSettings` — explicit hyperparameters.
 - **`save_and_load_triton_models`** — upload/download weights to S3 and prepare
   the Triton layout (`config.pbtxt`, `model.py`, old-version cleanup).
@@ -44,7 +45,7 @@ from datetime import datetime
 
 import pandas as pd
 from rectools.dataset import Dataset
-from smartrec_lib.model import ALSSettings
+from smartrec_lib.model import ALSSettings, ModelSetSettings
 from smartrec_lib.recommenders.recommender_als import RecommenderALS
 
 interactions = pd.DataFrame({
@@ -55,9 +56,11 @@ interactions = pd.DataFrame({
 })
 
 model = RecommenderALS(
-    recsys_config=ALSSettings(
-        ALS_FACTORS=64, ALS_ITERATIONS=15,
-        ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
+    recsys_config=ModelSetSettings(
+        als=ALSSettings(
+            ALS_FACTORS=64, ALS_ITERATIONS=15,
+            ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
+        ),
     ),
     model_name="als_model",
     model_version=datetime.now().strftime("%Y%m%d%H%M%S"),

@@ -1,13 +1,13 @@
-"""Tests for the covis session layer inside RecommenderALS (recsys_config.covis).
+"""Tests for the covis session layer of the ALS model set (ModelSetSettings.covis).
 
 Uses the shared synthetic dataset from conftest.py: maldives cluster (u1-u3,
 m1-m3), turkey cluster (u4-u6, t1-t3), globally popular pop1.
 """
 
-from smartrec_lib.model import ALSSettings, CoVisSettings, Strategy
+from smartrec_lib.model import ALSSettings, CoVisSettings, ModelSetSettings, Strategy
 from smartrec_lib.recommenders import RecommenderALS
 
-BASE = dict(
+BASE_ALS = dict(
     ALS_ITERATIONS=2,
     ALS_REGULARIZATION_FACTOR=0.01,
     ALS_FACTORS=8,
@@ -17,7 +17,8 @@ BASE = dict(
 
 
 def _fitted(dataset, **overrides):
-    config = ALSSettings(**{**BASE, **overrides})
+    """Overrides apply to the model set (covis=, blend=), not to the ALS ranker."""
+    config = ModelSetSettings(als=ALSSettings(**BASE_ALS), **overrides)
     model = RecommenderALS(recsys_config=config, model_name="als_test", model_version="1")
     model.train(dataset)
     return model
@@ -34,7 +35,7 @@ def test_no_covis_config_hot_user_with_session_keeps_realtime_strategy(dataset):
 
 def test_no_covis_config_trains_no_covis_layer(dataset):
     model = _fitted(dataset)
-    assert model.recsys_config.covis is None
+    assert model.model_set.covis is None
     assert model.covis is None
 
 

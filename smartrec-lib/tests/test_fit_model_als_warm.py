@@ -4,16 +4,18 @@ from pathlib import Path
 import pandas as pd
 from rectools import Columns
 from rectools.dataset import Dataset
-from smartrec_lib.model import ALSSettings, PopularSettings, Strategy
+from smartrec_lib.model import ALSSettings, ModelSetSettings, PopularSettings, Strategy
 from smartrec_lib.recommenders import RecommenderALS
 
-recsys_config_als = ALSSettings(
-    ALS_ITERATIONS=10,
-    RECOMMENDER_RANDOM_STATE=42,
-    ALS_REGULARIZATION_FACTOR=0.2,
-    ALS_FACTORS=256,  # latent embeddings size
-    ALS_ALPHA=50,  # confidence multiplier for non-zero entries in interactions
-    RECOMMENDER_DAYS_THRESHOLD=14,
+recsys_config_als = ModelSetSettings(
+    als=ALSSettings(
+        ALS_ITERATIONS=10,
+        RECOMMENDER_RANDOM_STATE=42,
+        ALS_REGULARIZATION_FACTOR=0.2,
+        ALS_FACTORS=256,  # latent embeddings size
+        ALS_ALPHA=50,  # confidence multiplier for non-zero entries in interactions
+        RECOMMENDER_DAYS_THRESHOLD=14,
+    ),
     popular=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=1)),
 )
 

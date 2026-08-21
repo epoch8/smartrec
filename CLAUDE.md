@@ -91,8 +91,9 @@ every change; they are enforced by this list.
 
 1. The outer `Recommender*` class is *not* in the pickle (Triton picks it by artifact name), but
    **every class reachable as a value inside `__dict__` is**, reconstructed by fully-qualified path:
-   `smartrec_lib.model.{ALSSettings, PopularSettings, CoVisSettings, BlendSettings, EASESettings,
-   CommonRecommenderSettings, Strategy}` and `smartrec_lib.recommenders.recommender_covis.RecommenderCoVis`
+   `smartrec_lib.model.{ModelSetSettings, ALSSettings, PopularSettings, CoVisSettings, BlendSettings,
+   EASESettings, CommonRecommenderSettings, Strategy}` and
+   `smartrec_lib.recommenders.recommender_covis.RecommenderCoVis`
    (it lives inside the `als_covis_youtravel` artifact as `RecommenderALS.covis`).
    Moving or renaming any of these makes existing artifacts unloadable on the next Triton poll —
    without a deploy.
@@ -102,9 +103,18 @@ every change; they are enforced by this list.
 3. Every `hasattr`/`getattr` shim in `recommender_als.py` and `recommender_covis.py` marks an
    artifact shape that still exists in S3. Removing one produces a 100% request-time error rate on
    that model, with a clean load.
-4. `recsys_config` is pickled inside the artifact. `ALSSettings.__setstate__` is the only migration
-   hook; it covers *field shape* only. Changing the base class of a settings object is not covered
-   and needs a `__reduce__` proven against a real prod pickle.
+4. `recsys_config` is pickled inside the artifact, and **three shapes of it exist in S3**: flat
+   (`ALSSettings` with `POPULARITY_*`/`COVIS_*`/`BLEND_*` fields), nested (`ALSSettings` with
+   `popular`/`covis`/`blend` sub-configs) and current (`ModelSetSettings`). Two hooks handle that,
+   and they cover *field shape* only:
+   - `ALSSettings.__setstate__` rebuilds sub-configs from flat fields on unpickle;
+   - `RecommenderALS.model_set` normalises either legacy shape into a `ModelSetSettings`.
+
+   Read composition through `self.model_set`, never off `self.recsys_config` — the latter is an
+   `ALSSettings` on every artifact currently in the buckets, and the only composition field the
+   serving path touches is `blend`, so getting this wrong does not raise. It silently fuses with
+   default weights. Changing the base class of a settings object is covered by neither hook and
+   needs a `__reduce__` proven against a real prod pickle.
 5. Version directories must be `str.isdigit()` — otherwise they are invisible to both loading and
    retention cleanup.
 
@@ -157,6 +167,10 @@ Fixed by the refactor that introduced this document: the L2 → L3 import leak (
 co-occurrence (`covis_kernel.py` → `kernels/cooccurrence.py`, with `research/covis.py` ported onto
 it); the `model.py` / `models/` collision (`models/` and `policy/` → `research/`, leaving only the
 two forced `model.py` files); and the `recommenders/` package import cycle.
+
+Fixed on 2026-08-22: composition moved off `ALSSettings` into `ModelSetSettings`, so the config of
+one ranker no longer declares who serves cold users and how two rankers are fused. `ALSSettings` is
+a leaf again. The cost is the shim in §5.4, removable after two retrain cycles.
 
 Still open:
 
