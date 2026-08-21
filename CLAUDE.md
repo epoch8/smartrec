@@ -153,9 +153,18 @@ every change; they are enforced by this list.
     bucket.
 12. Every artifact name needs its own `runtime_envs/runtime_env.tgz` copy in the Makefile upload
     targets. A new model with no runtime env cannot load.
-13. `--models` tokens are baked into the Airflow DAG in `youtravel-etl-yc`. An unknown token does
-    not fail the job — it logs and continues, so the artifact silently stops being refreshed while
-    Triton keeps serving a stale pickle indefinitely.
+13. `--models` tokens are baked into the Airflow DAG in `youtravel-etl-yc`. An unknown token, or an
+    unknown `--stand`, now **exits non-zero** — until 2026-08-22 it logged and continued, so a typo
+    in the DAG left the artifact silently un-refreshed while Triton served a stale pickle
+    indefinitely, and Airflow reported success. Keep it that way: a bad input must fail the task.
+
+14. The trainer keys a person by their **account id** whenever it has ever seen them signed in, and
+    by their `guest_id` otherwise. The feed API must ask Triton for that same id — it receives only
+    one id per request, so a previously-signed-in visitor browsing anonymously arrives as a
+    `guest_id` whose embedding lives under the account. `EventStorageService.resolve_canonical_user_id`
+    is the API-side half of this rule; the two link sources differ (180 days of ClickHouse vs what
+    our own ingestion wrote to Redis), so they narrow the gap rather than close it. Change one side
+    and you must change the other, or hot users quietly fall to the warm path.
 
 ## 6. Known deviations from this document
 
