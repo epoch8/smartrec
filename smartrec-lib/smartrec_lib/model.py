@@ -1,6 +1,6 @@
 from datetime import timedelta
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
@@ -33,13 +33,19 @@ class CoVisSettings(CommonRecommenderSettings):
 class BlendSettings(BaseModel):
     """Weighted reciprocal-rank fusion of two candidate lists.
 
-    Used only when a model composes two rankers (today: ALS x CoVis for hot
-    users with a live session). Weights come from the offline policy grid
-    (EXPERIMENTS.md 2026-08-03): als=1.0 + covis=1.0 beat pure ALS by ~6% map@10.
+    Weights are named after the ROLES being fused, not after the models filling
+    them. They were `ALS_WEIGHT`/`COVIS_WEIGHT` until 2026-08-22, which meant the
+    generic fusion config named two specific algorithms and the fusion call had
+    to read `{"main": blend.ALS_WEIGHT, "session": blend.COVIS_WEIGHT}` - visibly
+    translating between the two vocabularies. Swap ALS for LightFM and the old
+    names would have been actively wrong.
+
+    Values come from the offline policy grid (EXPERIMENTS.md 2026-08-03):
+    1.0 + 1.0 beat the main ranker alone by ~6% map@10.
     """
 
-    ALS_WEIGHT: float = 1.0
-    COVIS_WEIGHT: float = 1.0
+    MAIN_WEIGHT: float = 1.0
+    SESSION_WEIGHT: float = 1.0
     RRF_K: int = 60
 
 
@@ -49,8 +55,8 @@ class BlendSettings(BaseModel):
 _LEGACY_ALS_POPULAR_FIELDS = ("POPULARITY_STRATEGY", "POPULARITY_PERIOD")
 _LEGACY_ALS_COVIS_FIELDS = ("COVIS_TOP_K", "COVIS_MIN_COOC", "COVIS_SESSION_WEIGHTS")
 _LEGACY_ALS_BLEND_FIELDS = {
-    "BLEND_ALS_WEIGHT": "ALS_WEIGHT",
-    "BLEND_COVIS_WEIGHT": "COVIS_WEIGHT",
+    "BLEND_ALS_WEIGHT": "MAIN_WEIGHT",
+    "BLEND_COVIS_WEIGHT": "SESSION_WEIGHT",
     "BLEND_RRF_K": "RRF_K",
 }
 
@@ -117,36 +123,68 @@ class ALSSettings(CommonRecommenderSettings):
             )
 
 
+class EASESettings(CommonRecommenderSettings):
+    # Regularization for the closed-form item-item EASE model.
+    # 250 was the best value in offline k-fold sweeps (30-day training window).
+    # Warm ranker only: cold-user routing is handled by the Popular fallback.
+    EASE_REGULARIZATION: float = 250.0
+
+
+# A model that can rank the users it has a representation for. The main and
+# session roles below accept any of these, which is the whole point: swapping the
+# algorithm in a role is a change of TYPE, not of schema. Adding LightFM means
+# adding LightFMSettings here and to the class registry in recommender_model_set,
+# and touching nothing else.
+RankerSettings = Union[ALSSettings, EASESettings, CoVisSettings, PopularSettings]
+
+
 class ModelSetSettings(BaseModel):
-    """One servable artifact composed of several models.
+    """One servable artifact composed of several models, keyed BY ROLE.
 
-    An artifact is not one model: it is a main ranker, a fallback for users the
-    ranker cannot score, and optionally a session layer, plus the weights used
-    to fuse them. That shape belongs here rather than on the main ranker's own
-    config, where it lived until 2026-08-22 - `ALSSettings.covis` read as "a
-    hyperparameter of ALS", which it never was.
+    An artifact is not one model: it is a ranker for the users it can represent,
+    a fallback for everyone else, optionally something that scores the live
+    session, and the weights that fuse them.
 
-    - `als` - the main ranker. Serves hot users.
-    - `popular` - the fallback. Serves cold users, always present.
-    - `covis` - the session layer, optional. `None` means the artifact has no
-      session layer, which is exactly what the retired `SESSION_COVIS_ENABLED=False`
-      meant; the two ALS session paths then fall back to item similarity.
-    - `blend` - fusion weights, read only when `covis` is set: hot user with a
-      live session gets an RRF blend of ALS and CoVis.
+    **Each field is a ROLE and its value's type is the model filling it.** That
+    is deliberate and it is the second half of a lesson learned twice:
 
-    The two shipped artifacts are the two shapes of this class: `als_youtravel`
-    is als+popular, `als_covis_youtravel` is als+popular+covis+blend. Per the
-    offline research (EXPERIMENTS.md 2026-08-02/03) the blend beat pure ALS by
-    ~6% map@10, and CoVis beat the ALS item-sim path it replaces by 4x.
+    - `ALSSettings.covis` named a sibling model inside one ranker's config, so
+      "who serves the session" looked like an ALS hyperparameter (fixed 2026-08-22);
+    - then the fields here were `als`/`popular`/`covis`, i.e. named after the
+      algorithms currently filling the roles. Putting LightFM in as the main
+      ranker would have meant either a second field for the same role or a field
+      called `als` holding a LightFMSettings. Now it is `main=LightFMSettings(...)`
+      and the schema does not move.
 
-    Plain BaseModel, not BaseSettings: composition is not env-driven, and this
-    is constructed on the serving path for legacy artifacts, where scanning the
+    Roles:
+
+    - `main` - ranks users it has a representation for. Required.
+    - `fallback` - ranks everyone else. Required; there is always someone the
+      main ranker cannot score.
+    - `session` - ranks from the live session. `None` means the artifact has no
+      session layer - exactly what the retired `SESSION_COVIS_ENABLED=False`
+      meant - and `main` then scores sessions with its own machinery.
+    - `blend` - fusion weights, read only when `session` is set.
+
+    The two shipped artifacts are two shapes of this class: `als_youtravel` is
+    main+fallback, `als_covis_youtravel` adds session+blend. Per the offline
+    research (EXPERIMENTS.md 2026-08-02/03) the blend beat the main ranker alone
+    by ~6% map@10, and co-visitation beat the item-similarity session path it
+    replaces by 4x.
+
+    Plain BaseModel, not BaseSettings: composition is not env-driven, and this is
+    constructed on the serving path for legacy artifacts, where scanning the
     environment on every request would be a waste.
+
+    Note on shape: one model per role. Fusing two candidate sources within a
+    single role (ALS *and* LightFM as main) would want `Dict[str, Member]` with
+    the weight on the member instead - that is the next shape, and the trigger
+    for it is a second model in one role, not a fourth model overall.
     """
 
-    als: ALSSettings
-    popular: PopularSettings = Field(default_factory=PopularSettings)
-    covis: Optional[CoVisSettings] = None
+    main: RankerSettings
+    fallback: RankerSettings = Field(default_factory=PopularSettings)
+    session: Optional[RankerSettings] = None
     blend: BlendSettings = Field(default_factory=BlendSettings)
 
     @classmethod
@@ -157,10 +195,14 @@ class ModelSetSettings(BaseModel):
         rebuilt the sub-configs by the time we get here) and the nested one that
         `als_covis_youtravel` carries today. Reads `__dict__` directly because
         after the split these names are no longer declared fields.
+
+        Note the vocabulary change: those artifacts named the roles after the
+        models (`popular`, `covis`), so this is also where the old names are
+        translated into roles.
         """
         fields = config.__dict__
         return cls(
-            als=ALSSettings(
+            main=ALSSettings(
                 RECOMMENDER_DAYS_THRESHOLD=fields.get("RECOMMENDER_DAYS_THRESHOLD", 7),
                 RECOMMENDER_RANDOM_STATE=fields.get("RECOMMENDER_RANDOM_STATE", 42),
                 ALS_ITERATIONS=fields["ALS_ITERATIONS"],
@@ -168,17 +210,10 @@ class ModelSetSettings(BaseModel):
                 ALS_FACTORS=fields["ALS_FACTORS"],
                 ALS_ALPHA=fields["ALS_ALPHA"],
             ),
-            popular=fields.get("popular") or PopularSettings(),
-            covis=fields.get("covis"),
+            fallback=fields.get("popular") or PopularSettings(),
+            session=fields.get("covis"),
             blend=fields.get("blend") or BlendSettings(),
         )
-
-
-class EASESettings(CommonRecommenderSettings):
-    # Regularization for the closed-form item-item EASE model.
-    # 250 was the best value in offline k-fold sweeps (30-day training window).
-    # Warm ranker only: cold-user routing is handled by the Popular fallback.
-    EASE_REGULARIZATION: float = 250.0
 
 
 class Strategy(Enum):

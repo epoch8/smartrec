@@ -9,7 +9,7 @@ from smartrec_lib.model import ALSSettings, ModelSetSettings, PopularSettings, S
 from smartrec_lib.recommenders import RecommenderModelSet
 
 recsys_config_als = ModelSetSettings(
-    als=ALSSettings(
+    main=ALSSettings(
         ALS_ITERATIONS=10,
         RECOMMENDER_RANDOM_STATE=42,
         ALS_REGULARIZATION_FACTOR=0.2,
@@ -17,7 +17,7 @@ recsys_config_als = ModelSetSettings(
         ALS_ALPHA=50,  # confidence multiplier for non-zero entries in interactions
         RECOMMENDER_DAYS_THRESHOLD=14,
     ),
-    popular=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=1)),
+    fallback=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=1)),
 )
 
 test_data = Path(__file__).parent

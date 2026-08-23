@@ -26,10 +26,19 @@ from pathy import Pathy
 from rectools.dataset import Dataset
 
 from smartrec_lib.kernels.fusion import rrf_fuse
-from smartrec_lib.model import ModelSetSettings, RecomItems, Strategy
+from smartrec_lib.model import (
+    ALSSettings,
+    CoVisSettings,
+    EASESettings,
+    ModelSetSettings,
+    PopularSettings,
+    RecomItems,
+    Strategy,
+)
 from smartrec_lib.recommenders.base import RecommenderModel
 from smartrec_lib.recommenders.recommender_als import RecommenderALS
 from smartrec_lib.recommenders.recommender_covis import RecommenderCoVis
+from smartrec_lib.recommenders.recommender_ease import RecommenderEASE
 from smartrec_lib.recommenders.recommender_popular import RecommenderPopular
 from smartrec_lib.save_and_load_triton_models import (
     clean_old_model_versions,
@@ -38,6 +47,18 @@ from smartrec_lib.save_and_load_triton_models import (
 
 logger = logging.getLogger("Model Set")
 logger.setLevel(logging.INFO)
+
+# Which model implements which settings. This is the ONLY place in the library
+# that maps the two, which is what lets a role hold any model: the config says
+# `main=LightFMSettings(...)` and the set builds a RecommenderLightFM without a
+# single conditional anywhere else. Adding a model = one entry here plus the type
+# in `RankerSettings`.
+MODEL_FOR_SETTINGS = {
+    ALSSettings: RecommenderALS,
+    CoVisSettings: RecommenderCoVis,
+    PopularSettings: RecommenderPopular,
+    EASESettings: RecommenderEASE,
+}
 
 
 class RecommenderModelSet(RecommenderModel):
@@ -77,31 +98,39 @@ class RecommenderModelSet(RecommenderModel):
 
     # --- construction ---------------------------------------------------------
 
+    def _build(self, member_config) -> Optional[RecommenderModel]:
+        """Instantiate the model that implements this settings type.
+
+        No role is hardcoded to a class: the role is the config FIELD, the model
+        is the config's TYPE. Swapping the algorithm in a role is a change to
+        `app/src/settings.py`, not to this file.
+        """
+        if member_config is None:
+            return None
+        model_class = MODEL_FOR_SETTINGS.get(type(member_config))
+        if model_class is None:
+            raise ValueError(
+                f"No model registered for {type(member_config).__name__}. "
+                f"Add it to MODEL_FOR_SETTINGS and to RankerSettings."
+            )
+        return model_class(
+            recsys_config=member_config,
+            model_name=self.model_name,
+            model_version=self.model_version,
+        )
+
     def train(self, dataset: Dataset) -> None:
         assert self.recsys_config is not None
         config = self.recsys_config
 
-        self.main = RecommenderALS(
-            recsys_config=config.als,
-            model_name=self.model_name,
-            model_version=self.model_version,
-        )
+        self.main = self._build(config.main)
         self.main.train(dataset)
 
-        self.fallback = RecommenderPopular(
-            recsys_config=config.popular,
-            model_name=self.model_name,
-            model_version=self.model_version,
-        )
+        self.fallback = self._build(config.fallback)
         self.fallback.train(dataset)
 
-        self.session = None
-        if config.covis is not None:
-            self.session = RecommenderCoVis(
-                recsys_config=config.covis,
-                model_name=self.model_name,
-                model_version=self.model_version,
-            )
+        self.session = self._build(config.session)
+        if self.session is not None:
             self.session.train(dataset)
 
         logger.info(
@@ -130,7 +159,7 @@ class RecommenderModelSet(RecommenderModel):
         config = ModelSetSettings.from_legacy_als_settings(state["recsys_config"])
 
         main = RecommenderALS(
-            recsys_config=config.als,
+            recsys_config=config.main,
             model_name=state.get("model_name"),
             model_version=state.get("model_version"),
         )
@@ -152,7 +181,7 @@ class RecommenderModelSet(RecommenderModel):
                 setattr(main, attr, state[attr])
 
         fallback = RecommenderPopular(
-            recsys_config=config.popular,
+            recsys_config=config.fallback,
             model_name=state.get("model_name"),
             model_version=state.get("model_version"),
         )
@@ -326,7 +355,7 @@ class RecommenderModelSet(RecommenderModel):
 
         fused = rrf_fuse(
             {"main": main_list, "session": list(session_result.item_ids)},
-            {"main": blend.ALS_WEIGHT, "session": blend.COVIS_WEIGHT},
+            {"main": blend.MAIN_WEIGHT, "session": blend.SESSION_WEIGHT},
             rrf_k=blend.RRF_K,
         )
         # The session member only filters its own seed, so training-viewed items

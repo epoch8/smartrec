@@ -39,7 +39,7 @@ def dataset(interactions_df):
 def trained_model(dataset):
     """Create and train ALS model."""
     config = ModelSetSettings(
-        als=ALSSettings(
+        main=ALSSettings(
             ALS_FACTORS=16,
             ALS_ITERATIONS=5,
             ALS_REGULARIZATION_FACTOR=0.01,
@@ -488,7 +488,7 @@ if __name__ == "__main__":
     dataset = Dataset.construct(interactions_df)
 
     config = ModelSetSettings(
-        als=ALSSettings(
+        main=ALSSettings(
             ALS_FACTORS=16,
             ALS_ITERATIONS=5,
             ALS_REGULARIZATION_FACTOR=0.01,

@@ -56,14 +56,14 @@ def test_flag_on_without_weights_in_history_matches_flag_off(dataset):
 
 def test_als_covis_layer_inherits_the_flag(dataset):
     config = ModelSetSettings(
-        als=ALSSettings(
+        main=ALSSettings(
             ALS_ITERATIONS=2,
             ALS_REGULARIZATION_FACTOR=0.01,
             ALS_FACTORS=8,
             ALS_ALPHA=10,
             RECOMMENDER_DAYS_THRESHOLD=30,
         ),
-        covis=CoVisSettings(COVIS_MIN_COOC=2, COVIS_SESSION_WEIGHTS=True),
+        session=CoVisSettings(COVIS_MIN_COOC=2, COVIS_SESSION_WEIGHTS=True),
     )
     model = RecommenderModelSet(recsys_config=config, model_name="als_test", model_version="1")
     model.train(dataset)

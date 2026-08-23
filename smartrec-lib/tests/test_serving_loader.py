@@ -54,9 +54,9 @@ def triton_model_module():
 
 def _trained_set(dataset, *, with_session):
     config = ModelSetSettings(
-        als=ALSSettings(**BASE),
-        popular=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
-        covis=CoVisSettings(COVIS_MIN_COOC=2) if with_session else None,
+        main=ALSSettings(**BASE),
+        fallback=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
+        session=CoVisSettings(COVIS_MIN_COOC=2) if with_session else None,
     )
     model_set = RecommenderModelSet(
         recsys_config=config,
@@ -92,7 +92,7 @@ def test_a_legacy_als_pickle_loads_as_an_adapted_model_set(triton_model_module, 
     legacy_state = {
         "model_name": "als_covis_youtravel",
         "model_version": "1",
-        "recsys_config": model_set.recsys_config.als,
+        "recsys_config": model_set.recsys_config.main,
         "model_hot_users": model_set.main.model_hot_users,
         "model_cold_users": model_set.fallback.model,
         "covis": model_set.session,

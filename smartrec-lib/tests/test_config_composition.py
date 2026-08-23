@@ -86,16 +86,16 @@ def _legacy_config(**overrides):
 
 
 def test_composition_defaults_to_no_session_layer():
-    config = ModelSetSettings(als=ALSSettings(**BASE))
-    assert config.covis is None
-    assert isinstance(config.popular, PopularSettings)
+    config = ModelSetSettings(main=ALSSettings(**BASE))
+    assert config.session is None
+    assert isinstance(config.fallback, PopularSettings)
     assert isinstance(config.blend, BlendSettings)
 
 
 def test_covis_presence_is_the_switch():
-    config = ModelSetSettings(als=ALSSettings(**BASE), covis=CoVisSettings(COVIS_MIN_COOC=3, COVIS_TOP_K=7))
-    assert config.covis.COVIS_MIN_COOC == 3
-    assert config.covis.COVIS_TOP_K == 7
+    config = ModelSetSettings(main=ALSSettings(**BASE), session=CoVisSettings(COVIS_MIN_COOC=3, COVIS_TOP_K=7))
+    assert config.session.COVIS_MIN_COOC == 3
+    assert config.session.COVIS_TOP_K == 7
 
 
 def test_sub_model_fields_are_no_longer_on_the_parent():
@@ -112,8 +112,8 @@ def test_composition_is_not_on_the_als_ranker_config():
     two rankers fused" are not hyperparameters of ALS.
     """
     for field, value in (
-        ("popular", PopularSettings()),
-        ("covis", CoVisSettings()),
+        ("fallback", PopularSettings()),
+        ("session", CoVisSettings()),
         ("blend", BlendSettings()),
     ):
         with pytest.raises(Exception):
@@ -123,16 +123,16 @@ def test_composition_is_not_on_the_als_ranker_config():
 def test_the_set_hands_each_member_its_own_config(dataset):
     """Members are configured BY the set and never reach into it."""
     config = ModelSetSettings(
-        als=ALSSettings(**BASE),
-        popular=PopularSettings(POPULARITY_STRATEGY="n_interactions"),
-        covis=CoVisSettings(COVIS_MIN_COOC=2, COVIS_SESSION_WEIGHTS=True),
+        main=ALSSettings(**BASE),
+        fallback=PopularSettings(POPULARITY_STRATEGY="n_interactions"),
+        session=CoVisSettings(COVIS_MIN_COOC=2, COVIS_SESSION_WEIGHTS=True),
     )
     model = RecommenderModelSet(recsys_config=config, model_name="als_test", model_version="1")
     model.train(dataset)
 
-    assert model.main.recsys_config is config.als
-    assert model.fallback.recsys_config is config.popular
-    assert model.session.recsys_config is config.covis
+    assert model.main.recsys_config is config.main
+    assert model.fallback.recsys_config is config.fallback
+    assert model.session.recsys_config is config.session
     # And the ALS member holds a LEAF config - no composition reachable from it.
     assert not hasattr(model.main.recsys_config, "covis")
 
@@ -141,6 +141,9 @@ def test_the_set_hands_each_member_its_own_config(dataset):
 
 
 def test_legacy_pickle_migrates_flat_fields_into_sub_configs():
+    # NOTE the names: this is an ALSSettings from a legacy pickle, and it carries
+    # `popular`/`covis` - the pre-role vocabulary. Translating those into
+    # main/fallback/session is `from_legacy_als_settings`, tested separately.
     config = _legacy_config()
     assert isinstance(config, ALSSettings)
     assert config.popular.POPULARITY_STRATEGY == "n_users"
@@ -149,14 +152,15 @@ def test_legacy_pickle_migrates_flat_fields_into_sub_configs():
     assert config.covis.COVIS_TOP_K == 100
     assert config.covis.COVIS_MIN_COOC == 2
     assert config.covis.COVIS_SESSION_WEIGHTS is False
-    assert config.blend.ALS_WEIGHT == 1.0
-    assert config.blend.COVIS_WEIGHT == 1.0
+    assert config.blend.MAIN_WEIGHT == 1.0
+    assert config.blend.SESSION_WEIGHT == 1.0
     assert config.blend.RRF_K == 60
 
 
 def test_legacy_pickle_without_the_flag_has_no_session_layer():
     config = _legacy_config(SESSION_COVIS_ENABLED=False)
     assert config.covis is None
+    assert ModelSetSettings.from_legacy_als_settings(config).session is None
 
 
 def test_legacy_pickle_predating_covis_fields_entirely():
@@ -177,8 +181,8 @@ def test_legacy_pickle_keeps_the_old_attributes_readable():
 
 def test_legacy_blend_weights_are_actually_used():
     config = _legacy_config(BLEND_ALS_WEIGHT=3.5, BLEND_COVIS_WEIGHT=0.25, BLEND_RRF_K=11)
-    assert config.blend.ALS_WEIGHT == 3.5
-    assert config.blend.COVIS_WEIGHT == 0.25
+    assert config.blend.MAIN_WEIGHT == 3.5
+    assert config.blend.SESSION_WEIGHT == 0.25
     assert config.blend.RRF_K == 11
 
 
@@ -222,9 +226,9 @@ def test_legacy_artifact_loads_and_recommends_identically(dataset, tmp_path):
     silently, because a wrong member assignment raises nothing.
     """
     config = ModelSetSettings(
-        als=ALSSettings(**BASE),
-        popular=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
-        covis=CoVisSettings(RECOMMENDER_DAYS_THRESHOLD=30, COVIS_TOP_K=100, COVIS_MIN_COOC=2),
+        main=ALSSettings(**BASE),
+        fallback=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
+        session=CoVisSettings(RECOMMENDER_DAYS_THRESHOLD=30, COVIS_TOP_K=100, COVIS_MIN_COOC=2),
     )
     reference = RecommenderModelSet(recsys_config=config, model_name="als_covis_youtravel", model_version="1")
     reference.train(dataset)
@@ -263,8 +267,8 @@ def test_legacy_artifact_loads_and_recommends_identically(dataset, tmp_path):
 def test_legacy_artifact_without_a_session_layer_still_routes(dataset, tmp_path):
     """An als_youtravel artifact: no covis inside, so main scores the session."""
     config = ModelSetSettings(
-        als=ALSSettings(**BASE),
-        popular=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
+        main=ALSSettings(**BASE),
+        fallback=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
     )
     reference = RecommenderModelSet(recsys_config=config, model_name="als_youtravel", model_version="1")
     reference.train(dataset)
@@ -299,13 +303,14 @@ def test_legacy_nested_config_is_read_as_a_model_set():
     config = ALSSettings(**BASE)
     config.__dict__["popular"] = PopularSettings(POPULARITY_STRATEGY="n_interactions")
     config.__dict__["covis"] = CoVisSettings(COVIS_TOP_K=33)
-    config.__dict__["blend"] = BlendSettings(ALS_WEIGHT=2.5, COVIS_WEIGHT=0.5, RRF_K=7)
+    config.__dict__["blend"] = BlendSettings(MAIN_WEIGHT=2.5, SESSION_WEIGHT=0.5, RRF_K=7)
 
     model_set = ModelSetSettings.from_legacy_als_settings(config)
-    assert model_set.als.ALS_FACTORS == BASE["ALS_FACTORS"]
-    assert model_set.popular.POPULARITY_STRATEGY == "n_interactions"
-    assert model_set.covis.COVIS_TOP_K == 33
-    assert model_set.blend.ALS_WEIGHT == 2.5
+    # In goes the old model-named vocabulary, out comes roles.
+    assert model_set.main.ALS_FACTORS == BASE["ALS_FACTORS"]
+    assert model_set.fallback.POPULARITY_STRATEGY == "n_interactions"
+    assert model_set.session.COVIS_TOP_K == 33
+    assert model_set.blend.MAIN_WEIGHT == 2.5
     assert model_set.blend.RRF_K == 7
 
 
@@ -320,7 +325,7 @@ def test_legacy_artifact_blends_with_its_own_weights_not_defaults(dataset):
     trained = _legacy_config(BLEND_ALS_WEIGHT=4.0, BLEND_COVIS_WEIGHT=0.1, BLEND_RRF_K=13)
 
     blend = ModelSetSettings.from_legacy_als_settings(trained).blend
-    assert (blend.ALS_WEIGHT, blend.COVIS_WEIGHT, blend.RRF_K) == (4.0, 0.1, 13)
+    assert (blend.MAIN_WEIGHT, blend.SESSION_WEIGHT, blend.RRF_K) == (4.0, 0.1, 13)
     assert blend != BlendSettings(), "read the trained weights, not the defaults"
 
 
