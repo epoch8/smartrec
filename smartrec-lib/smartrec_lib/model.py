@@ -240,31 +240,31 @@ class Strategy(Enum):
     and every consumer watching for the segment, and tells them nothing they
     could not read off `model_name`. Add a value here only for a genuinely new
     segment or signal.
+
+    This enum declares what a model MAY emit. It is deliberately NOT the full
+    published vocabulary: `api/docs/DEBUG_INFO_CODEC.md` owns that, its numeric
+    ids are append-only, and it already carries rows no member here corresponds
+    to (`popular`/8, `random`/9, and since 2026-08-25 `model_hot_and_cold_users`/4,
+    `als_covis_blend`/11, `covis_session`/12). Those three were dropped from here
+    because nothing has emitted them for weeks and a member no model can produce
+    reads as a live option. Their ids stay reserved in the codec forever - the
+    consumer decodes historical records with them - so removing a row there, as
+    opposed to a member here, would break that decoding.
     """
 
     # Standard model-based strategies (trained on historical data)
     MODEL_HOT_USERS = "model_hot_users"  # User in training data, ALS embeddings
     MODEL_COLD_USERS = "model_cold_users"  # New user, popular items
     MODEL_WARM_USERS = "model_warm_users"
-    # No model emits this any more (its last emitter, RecommenderRandom, is gone).
-    # Kept because the string is a published contract - see api/docs/DEBUG_INFO_CODEC.md.
-    MODEL_HOT_AND_COLD_USERS = "model_hot_and_cold_users"
 
     # Real-time strategies (enriched with session events from Redis). These are
-    # emitted whichever session algorithm the artifact uses: als_youtravel scores
-    # the session with ALS item-similarity, als_covis_youtravel with an RRF blend
-    # of ALS and co-visitation. Same segment, same signal, same label.
+    # emitted whichever algorithm fills the realtime role: als_youtravel scores
+    # the live session with ALS item-similarity, als_covis_youtravel with an RRF
+    # blend of the ALS profile and co-visitation. Same segment, same signal, same
+    # label - which artifact answered is carried by `model_name`.
     MODEL_REALTIME_HOT_USERS = "model_realtime_hot_users"  # Hot user + real-time events
     MODEL_REALTIME_WARM_USERS = "model_realtime_warm_users"  # New user with real-time events
     MODEL_REALTIME_COLD_USERS = "model_realtime_cold_users"  # Cold user with filtered popular by events
-
-    # Retired, reserved. These briefly labelled the two als_covis session paths,
-    # which was the mistake described above: consumers waiting for
-    # model_realtime_* stopped seeing anything, while the strings carried only
-    # what model_name already said. Nothing emits them now; the values stay
-    # because their numeric ids in api/docs/DEBUG_INFO_CODEC.md are append-only.
-    MODEL_ALS_COVIS_BLEND = "als_covis_blend"
-    MODEL_COVIS_SESSION = "covis_session"
 
     # Fallback
     NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY = "no_strategy_items_to_recommend_filtered_is_empty"

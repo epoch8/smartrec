@@ -147,10 +147,16 @@ every change; they are enforced by this list.
 7. `serving/config.pbtxt` and `serving/model.py` in this tree *are* the deployed files — the trainer
    overwrites them in S3 on every run. A bad import in `serving/model.py` breaks every model in the
    bucket, including ones that were not retrained.
-8. `Strategy` values are a published vocabulary mirrored by numeric id in
-   `api/docs/DEBUG_INFO_CODEC.md`. Append-only; ids are never renumbered.
-   `MODEL_HOT_AND_COLD_USERS`, `MODEL_ALS_COVIS_BLEND` and `MODEL_COVIS_SESSION` have no emitter
-   and stay anyway.
+8. `Strategy` declares what a model MAY emit; `api/docs/DEBUG_INFO_CODEC.md` owns the published
+   vocabulary and its numeric ids, which are append-only and never renumbered. The two are NOT the
+   same set: the codec has rows with no member here (`popular`/8, `random`/9, and since 2026-08-25
+   `model_hot_and_cold_users`/4, `als_covis_blend`/11, `covis_session`/12, dropped from the enum
+   because nothing had emitted them for weeks and a member no model can produce reads as a live
+   option). **Never remove a row from the codec** - the consumer decodes historical records by id,
+   and our API only ever passes the string through, so the codec is the sole authority for what an
+   old id meant. Removing a MEMBER is safe and was verified so: no pickle in either bucket contains
+   a `Strategy` reference (checked in the pickle bytecode of the prod artifact), nothing does
+   `Strategy(value)` and nothing iterates the enum.
    **A strategy names the user segment and the signal used, never the algorithm.** Which artifact
    answered — and therefore which algorithm — is already carried by `model_name` next to it. Adding
    a strategy string for a new internal algorithm silently breaks every consumer watching for the
