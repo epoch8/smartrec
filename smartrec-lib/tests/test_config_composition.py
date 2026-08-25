@@ -87,15 +87,15 @@ def _legacy_config(**overrides):
 
 def test_composition_defaults_to_no_session_layer():
     config = ModelSetSettings(main=ALSSettings(**BASE))
-    assert config.session is None
+    assert config.realtime is None
     assert isinstance(config.fallback, PopularSettings)
     assert isinstance(config.blend, BlendSettings)
 
 
 def test_covis_presence_is_the_switch():
-    config = ModelSetSettings(main=ALSSettings(**BASE), session=CoVisSettings(COVIS_MIN_COOC=3, COVIS_TOP_K=7))
-    assert config.session.COVIS_MIN_COOC == 3
-    assert config.session.COVIS_TOP_K == 7
+    config = ModelSetSettings(main=ALSSettings(**BASE), realtime=CoVisSettings(COVIS_MIN_COOC=3, COVIS_TOP_K=7))
+    assert config.realtime.COVIS_MIN_COOC == 3
+    assert config.realtime.COVIS_TOP_K == 7
 
 
 def test_sub_model_fields_are_no_longer_on_the_parent():
@@ -113,7 +113,7 @@ def test_composition_is_not_on_the_als_ranker_config():
     """
     for field, value in (
         ("fallback", PopularSettings()),
-        ("session", CoVisSettings()),
+        ("realtime", CoVisSettings()),
         ("blend", BlendSettings()),
     ):
         with pytest.raises(Exception):
@@ -125,14 +125,14 @@ def test_the_set_hands_each_member_its_own_config(dataset):
     config = ModelSetSettings(
         main=ALSSettings(**BASE),
         fallback=PopularSettings(POPULARITY_STRATEGY="n_interactions"),
-        session=CoVisSettings(COVIS_MIN_COOC=2, COVIS_SESSION_WEIGHTS=True),
+        realtime=CoVisSettings(COVIS_MIN_COOC=2, COVIS_SESSION_WEIGHTS=True),
     )
     model = RecommenderModelSet(recsys_config=config, model_name="als_test", model_version="1")
     model.train(dataset)
 
     assert model.main.recsys_config is config.main
     assert model.fallback.recsys_config is config.fallback
-    assert model.session.recsys_config is config.session
+    assert model.realtime.recsys_config is config.realtime
     # And the ALS member holds a LEAF config - no composition reachable from it.
     assert not hasattr(model.main.recsys_config, "covis")
 
@@ -153,14 +153,14 @@ def test_legacy_pickle_migrates_flat_fields_into_sub_configs():
     assert config.covis.COVIS_MIN_COOC == 2
     assert config.covis.COVIS_SESSION_WEIGHTS is False
     assert config.blend.MAIN_WEIGHT == 1.0
-    assert config.blend.SESSION_WEIGHT == 1.0
+    assert config.blend.REALTIME_WEIGHT == 1.0
     assert config.blend.RRF_K == 60
 
 
 def test_legacy_pickle_without_the_flag_has_no_session_layer():
     config = _legacy_config(SESSION_COVIS_ENABLED=False)
     assert config.covis is None
-    assert ModelSetSettings.from_legacy_als_settings(config).session is None
+    assert ModelSetSettings.from_legacy_als_settings(config).realtime is None
 
 
 def test_legacy_pickle_predating_covis_fields_entirely():
@@ -182,7 +182,7 @@ def test_legacy_pickle_keeps_the_old_attributes_readable():
 def test_legacy_blend_weights_are_actually_used():
     config = _legacy_config(BLEND_ALS_WEIGHT=3.5, BLEND_COVIS_WEIGHT=0.25, BLEND_RRF_K=11)
     assert config.blend.MAIN_WEIGHT == 3.5
-    assert config.blend.SESSION_WEIGHT == 0.25
+    assert config.blend.REALTIME_WEIGHT == 0.25
     assert config.blend.RRF_K == 11
 
 
@@ -204,7 +204,7 @@ def _legacy_als_artifact_state(model_set: RecommenderModelSet) -> dict:
         "recsys_config": LegacyALSSettings(LEGACY_ALS_COVIS_DICT),
         "model_hot_users": main.model_hot_users,
         "model_cold_users": fallback.model,
-        "covis": model_set.session,
+        "covis": model_set.realtime,
         "dataset": main.dataset,
         "item_id_map": main.item_id_map,
         "user_id_map": main.user_id_map,
@@ -228,7 +228,7 @@ def test_legacy_artifact_loads_and_recommends_identically(dataset, tmp_path):
     config = ModelSetSettings(
         main=ALSSettings(**BASE),
         fallback=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
-        session=CoVisSettings(RECOMMENDER_DAYS_THRESHOLD=30, COVIS_TOP_K=100, COVIS_MIN_COOC=2),
+        realtime=CoVisSettings(RECOMMENDER_DAYS_THRESHOLD=30, COVIS_TOP_K=100, COVIS_MIN_COOC=2),
     )
     reference = RecommenderModelSet(recsys_config=config, model_name="als_covis_youtravel", model_version="1")
     reference.train(dataset)
@@ -244,7 +244,7 @@ def test_legacy_artifact_loads_and_recommends_identically(dataset, tmp_path):
     # The members were reassembled from the flat state, not from a config.
     assert isinstance(loaded.main, RecommenderALS)
     assert isinstance(loaded.fallback, RecommenderPopular)
-    assert loaded.session is not None
+    assert loaded.realtime is not None
 
     cases = [
         dict(user_ids="u1", history=["m2", "m1"]),  # known + session -> fused
@@ -281,7 +281,7 @@ def test_legacy_artifact_without_a_session_layer_still_routes(dataset, tmp_path)
     state["model_name"] = "als_youtravel"
 
     loaded = RecommenderModelSet.from_legacy_als_state(state)
-    assert loaded.session is None
+    assert loaded.realtime is None
 
     for case in (
         dict(user_ids="u1", history=["m2", "m1"]),
@@ -303,13 +303,13 @@ def test_legacy_nested_config_is_read_as_a_model_set():
     config = ALSSettings(**BASE)
     config.__dict__["popular"] = PopularSettings(POPULARITY_STRATEGY="n_interactions")
     config.__dict__["covis"] = CoVisSettings(COVIS_TOP_K=33)
-    config.__dict__["blend"] = BlendSettings(MAIN_WEIGHT=2.5, SESSION_WEIGHT=0.5, RRF_K=7)
+    config.__dict__["blend"] = BlendSettings(MAIN_WEIGHT=2.5, REALTIME_WEIGHT=0.5, RRF_K=7)
 
     model_set = ModelSetSettings.from_legacy_als_settings(config)
     # In goes the old model-named vocabulary, out comes roles.
     assert model_set.main.ALS_FACTORS == BASE["ALS_FACTORS"]
     assert model_set.fallback.POPULARITY_STRATEGY == "n_interactions"
-    assert model_set.session.COVIS_TOP_K == 33
+    assert model_set.realtime.COVIS_TOP_K == 33
     assert model_set.blend.MAIN_WEIGHT == 2.5
     assert model_set.blend.RRF_K == 7
 
@@ -325,7 +325,7 @@ def test_legacy_artifact_blends_with_its_own_weights_not_defaults(dataset):
     trained = _legacy_config(BLEND_ALS_WEIGHT=4.0, BLEND_COVIS_WEIGHT=0.1, BLEND_RRF_K=13)
 
     blend = ModelSetSettings.from_legacy_als_settings(trained).blend
-    assert (blend.MAIN_WEIGHT, blend.SESSION_WEIGHT, blend.RRF_K) == (4.0, 0.1, 13)
+    assert (blend.MAIN_WEIGHT, blend.REALTIME_WEIGHT, blend.RRF_K) == (4.0, 0.1, 13)
     assert blend != BlendSettings(), "read the trained weights, not the defaults"
 
 

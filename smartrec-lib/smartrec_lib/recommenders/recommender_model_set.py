@@ -1,7 +1,7 @@
 """One artifact, several models. The only place routing and fusion live.
 
 An artifact served by Triton is not one model. It is a main ranker for the users
-it has embeddings for, a fallback for everyone else, optionally a session layer,
+it has embeddings for, a fallback for everyone else, optionally a realtime layer,
 and the weights that fuse them. Until 2026-08-22 all of that lived inside
 `RecommenderALS`, which is why the two shipped artifacts read as "ALS with
 extras" - the ALS class owned a PopularModel, an optional RecommenderCoVis, the
@@ -68,8 +68,8 @@ class RecommenderModelSet(RecommenderModel):
 
     - `main` - ranks users it has a representation for. Today RecommenderALS.
     - `fallback` - ranks everyone else. Today RecommenderPopular. Always present.
-    - `session` - ranks from the live session. Optional; `None` means the artifact
-      has no session layer and `main` scores sessions with its own machinery,
+    - `realtime` - ranks from the live session events. Optional; `None` means the
+      artifact has no realtime layer and `main` scores those events itself,
       which is what `als_youtravel` does.
 
     The routing table is `recommend()` and it is deliberately the whole of the
@@ -94,7 +94,7 @@ class RecommenderModelSet(RecommenderModel):
 
         self.main: Optional[RecommenderModel] = None
         self.fallback: Optional[RecommenderModel] = None
-        self.session: Optional[RecommenderModel] = None
+        self.realtime: Optional[RecommenderModel] = None
 
     # --- construction ---------------------------------------------------------
 
@@ -129,16 +129,16 @@ class RecommenderModelSet(RecommenderModel):
         self.fallback = self._build(config.fallback)
         self.fallback.train(dataset)
 
-        self.session = self._build(config.session)
-        if self.session is not None:
-            self.session.train(dataset)
+        self.realtime = self._build(config.realtime)
+        if self.realtime is not None:
+            self.realtime.train(dataset)
 
         logger.info(
-            "Model set trained [%s]: main=%s fallback=%s session=%s",
+            "Model set trained [%s]: main=%s fallback=%s realtime=%s",
             self.model_name,
             type(self.main).__name__,
             type(self.fallback).__name__,
-            "none" if self.session is None else type(self.session).__name__,
+            "none" if self.realtime is None else type(self.realtime).__name__,
         )
 
     @classmethod
@@ -191,7 +191,7 @@ class RecommenderModelSet(RecommenderModel):
         fallback.user_id_map = state.get("user_id_map")
 
         # The covis member was already a full RecommenderCoVis inside the pickle.
-        session = state.get("covis")
+        realtime = state.get("covis")
 
         instance = cls(
             recsys_config=config,
@@ -200,19 +200,19 @@ class RecommenderModelSet(RecommenderModel):
         )
         instance.main = main
         instance.fallback = fallback
-        instance.session = session
+        instance.realtime = realtime
         logger.info(
-            "Adapted a legacy ALS artifact into a model set: session=%s",
-            "none" if session is None else type(session).__name__,
+            "Adapted a legacy ALS artifact into a model set: realtime=%s",
+            "none" if realtime is None else type(realtime).__name__,
         )
         return instance
 
     # --- routing --------------------------------------------------------------
 
-    def _session_available(self) -> bool:
-        """True when the session member exists and actually has a model behind it."""
-        session = self.session
-        return session is not None and bool(getattr(session, "neighbors", None))
+    def _realtime_available(self) -> bool:
+        """True when the realtime member exists and actually has a model behind it."""
+        realtime = self.realtime
+        return realtime is not None and bool(getattr(realtime, "neighbors", None))
 
     def recommend(
         self,
@@ -234,7 +234,7 @@ class RecommenderModelSet(RecommenderModel):
 
         has_session = history is not None and len(history) > 0
         known_user = self.main is not None and self.main.can_serve(user_ids)
-        # The main ranker cannot score items it never saw; the session and
+        # The main ranker cannot score items it never saw; the realtime and
         # fallback members do their own filtering.
         main_items = self.main.known_items(items_to_recommend) if self.main is not None else items_to_recommend
 
@@ -247,7 +247,7 @@ class RecommenderModelSet(RecommenderModel):
                 history=history,
             )
             # A session that contributed nothing - every seed unknown to the
-            # models, or the session member came back empty - must NOT be
+            # models, or the realtime member came back empty - must NOT be
             # labelled realtime. That answer is plain main-ranker output, and
             # mislabelling it would poison every A/B readout split on strategy.
             segment = Strategy.MODEL_REALTIME_HOT_USERS if session_used else Strategy.MODEL_HOT_USERS
@@ -306,16 +306,16 @@ class RecommenderModelSet(RecommenderModel):
     ) -> tuple[RecomItems, bool]:
         """Known user with a live session: fuse the two rankings, or let main enrich itself.
 
-        With a session member present this is a weighted RRF blend of the main
-        ranker and the session ranker - offline that beat pure ALS by ~6% map@10
+        With a realtime member present this is a weighted RRF blend of the main
+        ranker and the realtime ranker - offline that beat pure ALS by ~6% map@10
         (EXPERIMENTS.md 2026-08-03). Both sides are overfetched 2x so the fusion
-        has real overlap before the cut to top_n. With no session member, the
+        has real overlap before the cut to top_n. With no realtime member, the
         main ranker enriches itself from the session and we simply pass that on.
 
         Returns the answer and whether the session actually contributed, which
         is what the caller needs to name the segment honestly.
         """
-        if not self._session_available():
+        if not self._realtime_available():
             return self.main.recommend_hot_user_with_session(
                 user_ids=user_ids,
                 top_n=top_n,
@@ -327,7 +327,7 @@ class RecommenderModelSet(RecommenderModel):
         blend = self.recsys_config.blend
         fetch_n = top_n * 2
 
-        session_result = self.session.recommend(
+        realtime_result = self.realtime.recommend(
             user_ids,
             top_n=fetch_n,
             filter_viewed=filter_viewed,
@@ -342,8 +342,8 @@ class RecommenderModelSet(RecommenderModel):
         )
         main_list = [str(item) for item in main_external]
 
-        if not session_result.item_ids:
-            logger.info("[SET BLEND] session empty, serving main only: user=%s", user_ids)
+        if not realtime_result.item_ids:
+            logger.info("[SET BLEND] realtime empty, serving main only: user=%s", user_ids)
             return (
                 RecomItems(
                     item_ids=main_list[:top_n],
@@ -354,21 +354,21 @@ class RecommenderModelSet(RecommenderModel):
             )
 
         fused = rrf_fuse(
-            {"main": main_list, "session": list(session_result.item_ids)},
-            {"main": blend.MAIN_WEIGHT, "session": blend.SESSION_WEIGHT},
+            {"main": main_list, "realtime": list(realtime_result.item_ids)},
+            {"main": blend.MAIN_WEIGHT, "realtime": blend.REALTIME_WEIGHT},
             rrf_k=blend.RRF_K,
         )
-        # The session member only filters its own seed, so training-viewed items
+        # The realtime member only filters its own seed, so training-viewed items
         # have to be dropped here for filter_viewed to mean the same thing as on
         # the main-only path. Only the main ranker knows that set.
         exclude = self.main.viewed_external(user_ids) if filter_viewed else set()
         items = [item for item, _ in fused if item not in exclude][:top_n]
         scores = [1.0 / rank for rank in range(1, len(items) + 1)]
         logger.info(
-            "[SET BLEND] user=%s | main=%s session=%s -> fused=%s",
+            "[SET BLEND] user=%s | main=%s realtime=%s -> fused=%s",
             user_ids,
             len(main_list),
-            len(session_result.item_ids),
+            len(realtime_result.item_ids),
             len(items),
         )
         return RecomItems(item_ids=items, scores=scores, strategy=None), True
@@ -381,25 +381,25 @@ class RecommenderModelSet(RecommenderModel):
         items_to_recommend: Optional[List[Any]],
         history: List[str],
     ) -> RecomItems:
-        """Unknown visitor with a live session: the session member, else main's own.
+        """Unknown visitor with a live session: the realtime member, else main's own.
 
-        The session member is preferred because the main ranker's item-similarity
+        The realtime member is preferred because the main ranker's item-similarity
         path measured BELOW plain popularity offline while co-visitation was 4x
         better (EXPERIMENTS.md 2026-08-02). An empty session answer falls through
         to the main ranker rather than to popularity - a session we cannot score
         is still more informative than no session at all.
         """
-        if self._session_available():
-            session_result = self.session.recommend(
+        if self._realtime_available():
+            realtime_result = self.realtime.recommend(
                 user_ids,
                 top_n=top_n,
                 filter_viewed=filter_viewed,
                 items_to_recommend=items_to_recommend,
                 history=history,
             )
-            if session_result.item_ids:
-                return session_result
-            logger.info("[SET] session member returned nothing, falling back to main: user=%s", user_ids)
+            if realtime_result.item_ids:
+                return realtime_result
+            logger.info("[SET] realtime member returned nothing, falling back to main: user=%s", user_ids)
 
         result, _ = self.main.recommend_from_session(
             user_ids=user_ids,
@@ -414,7 +414,7 @@ class RecommenderModelSet(RecommenderModel):
 
     def warm_caches(self) -> None:
         """Warm every member that has lazy caches, before the first request."""
-        for member in (self.main, self.fallback, self.session):
+        for member in (self.main, self.fallback, self.realtime):
             warm = getattr(member, "warm_caches", None)
             if warm is not None:
                 warm()
@@ -422,7 +422,7 @@ class RecommenderModelSet(RecommenderModel):
     def calc_metrics(self, k: int, dataset: Dataset, n_splits: int = 3) -> Dict[str, Any]:
         """Metrics per member, keyed by role. Each member measures only itself."""
         results: Dict[str, Any] = {}
-        for role, member in (("main", self.main), ("fallback", self.fallback), ("session", self.session)):
+        for role, member in (("main", self.main), ("fallback", self.fallback), ("realtime", self.realtime)):
             if member is None:
                 continue
             try:

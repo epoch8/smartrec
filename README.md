@@ -38,12 +38,11 @@ interactions = pd.DataFrame({
     "datetime": pd.to_datetime(["2024-10-01", "2024-10-02", "2024-10-03"]),
 })
 
+# A member takes its OWN leaf config; only the set takes ModelSetSettings.
 model = RecommenderALS(
-    recsys_config=ModelSetSettings(
-        als=ALSSettings(
-            ALS_FACTORS=64, ALS_ITERATIONS=15,
-            ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
-        ),
+    recsys_config=ALSSettings(
+        ALS_FACTORS=64, ALS_ITERATIONS=15,
+        ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
     ),
     model_name="als_model",
     model_version=datetime.now().strftime("%Y%m%d%H%M%S"),

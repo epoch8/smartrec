@@ -93,8 +93,15 @@ first — do not resolve it by dropping a module at the package root.
   - `smartrec_lib/serving/model.py` — Triton's python backend loads a file by that exact name.
 - Modules are named for what they contain (`cooccurrence.py`, `fusion.py`), not for their layer
   (`base.py`, `utils.py`, `common.py`, `core.py`, `helpers.py` are all banned).
-- One concept, one name. `session_weight` (a per-source multiplier in fusion) and
-  `COVIS_SESSION_WEIGHTS` (a per-seed event multiplier) are unrelated — do not add a third.
+- One concept, one name. `session_weight` (a per-source multiplier in the co-occurrence kernel) and
+  `COVIS_SESSION_WEIGHTS` (a per-seed event multiplier) are unrelated — do not add a third. This is
+  why the fusion weight is `BlendSettings.REALTIME_WEIGHT` and not `SESSION_WEIGHT`.
+- **The signal is "session"; the role, the weight and the strategy are "realtime".** Live events
+  arriving from Redis are a session (`history=`, `has_session`, `session_used`); the member that
+  consumes them is `ModelSetSettings.realtime` / `RecommenderModelSet.realtime`, its weight is
+  `REALTIME_WEIGHT`, and what it produces is `model_realtime_*`. The role was briefly called
+  `session`, which left the config and the published strategy vocabulary disagreeing about the same
+  thing.
 
 ## 5. Frozen invariants
 
@@ -111,14 +118,14 @@ every change; they are enforced by this list.
    recommender_popular.RecommenderPopular}`. Moving or renaming any of these makes existing artifacts
    unloadable on the next Triton poll — without a deploy.
 2. Instance attribute names are frozen per class. A rename is silent: the fresh `__init__` default
-   survives `__dict__.update()`. `RecommenderModelSet.session = None` means `als_covis_youtravel`
-   quietly serves without its session layer, and nothing errors.
+   survives `__dict__.update()`. `RecommenderModelSet.realtime = None` means `als_covis_youtravel`
+   quietly serves without its realtime layer, and nothing errors.
 3. Every `hasattr`/`getattr` shim in the recommenders marks an artifact shape that still exists in
    S3. Removing one produces a 100% request-time error rate on that model, with a clean load.
 4. **Two generations of artifact exist in the buckets, and both must serve.** The old one is a
    `RecommenderALS` `__dict__` that carried every member itself (`model_cold_users`, `covis`) plus a
    flat or nested `ALSSettings`. The current one is a `RecommenderModelSet` `__dict__` with `main` /
-   `fallback` / `session`. Three hooks, covering *shape* only:
+   `fallback` / `realtime`. Three hooks, covering *shape* only:
    - `ALSSettings.__setstate__` — rebuilds sub-configs from flat fields on unpickle;
    - `ModelSetSettings.from_legacy_als_settings` — either legacy config shape into a model set config;
    - `RecommenderModelSet.from_legacy_als_state` — a legacy ARTIFACT into a model set, member by

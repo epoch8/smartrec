@@ -35,15 +35,15 @@ def test_no_covis_config_hot_user_with_session_keeps_realtime_strategy(dataset):
 
 def test_no_covis_config_trains_no_covis_layer(dataset):
     model = _fitted(dataset)
-    assert model.recsys_config.session is None
-    assert model.session is None
+    assert model.recsys_config.realtime is None
+    assert model.realtime is None
 
 
 # --- covis sub-config present: session paths replaced by covis ----------------
 
 
 def test_hot_user_without_session_serves_pure_als(dataset):
-    model = _fitted(dataset, session=CoVisSettings(COVIS_MIN_COOC=2))
+    model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("u1", top_n=3, filter_viewed=True, history=None)
     assert result.strategy == Strategy.MODEL_HOT_USERS.value
     assert result.item_ids
@@ -52,7 +52,7 @@ def test_hot_user_without_session_serves_pure_als(dataset):
 def test_hot_user_with_session_reports_the_realtime_segment(dataset):
     """The blend keeps the label the item-sim session path always used: the
     strategy names the segment (hot user, live session), not the algorithm."""
-    model = _fitted(dataset, session=CoVisSettings(COVIS_MIN_COOC=2))
+    model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("u1", top_n=3, filter_viewed=True, history=["m2", "m1"])
     assert result.strategy == Strategy.MODEL_REALTIME_HOT_USERS.value
     assert result.item_ids
@@ -64,7 +64,7 @@ def test_hot_user_with_session_actually_goes_through_covis(dataset):
     """Since both paths now report the same strategy, the label can no longer
     prove which one ran - so compare against the same model without the covis
     sub-config. Identical output would mean the blend never engaged."""
-    blended = _fitted(dataset, session=CoVisSettings(COVIS_MIN_COOC=2))
+    blended = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     item_sim = _fitted(dataset)
     session = ["m2", "m1"]
 
@@ -76,7 +76,7 @@ def test_hot_user_with_session_actually_goes_through_covis(dataset):
 
 
 def test_unknown_user_with_session_reports_the_realtime_segment(dataset):
-    model = _fitted(dataset, session=CoVisSettings(COVIS_MIN_COOC=2))
+    model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("ghost-user", top_n=3, filter_viewed=True, history=["m1", "m2"])
     assert result.strategy == Strategy.MODEL_REALTIME_WARM_USERS.value
     assert result.item_ids
@@ -84,7 +84,7 @@ def test_unknown_user_with_session_reports_the_realtime_segment(dataset):
 
 
 def test_unknown_user_with_session_actually_goes_through_covis(dataset):
-    covis_model = _fitted(dataset, session=CoVisSettings(COVIS_MIN_COOC=2))
+    covis_model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     item_sim = _fitted(dataset)
     session = ["m1", "m2"]
 
@@ -98,7 +98,7 @@ def test_unknown_user_with_unknown_session_falls_back_to_item_sim(dataset):
     """History covis has never seen -> covis returns nothing -> the parent
     item-sim path answers. Both report the same strategy now, so the fallback is
     pinned by output equality with the no-covis model instead."""
-    covis_model = _fitted(dataset, session=CoVisSettings(COVIS_MIN_COOC=2))
+    covis_model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     item_sim = _fitted(dataset)
     session = ["nope-1", "nope-2"]
 
@@ -109,7 +109,7 @@ def test_unknown_user_with_unknown_session_falls_back_to_item_sim(dataset):
 
 
 def test_cold_user_without_session_serves_popular(dataset):
-    model = _fitted(dataset, session=CoVisSettings(COVIS_MIN_COOC=2))
+    model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("ghost-user", top_n=3, filter_viewed=False, history=None)
     assert result.strategy == Strategy.MODEL_COLD_USERS.value
     assert result.item_ids
@@ -123,7 +123,7 @@ def test_session_paths_accept_numpy_history(dataset):
     `if not history` on a multi-element ndarray raises ValueError."""
     import numpy as np
 
-    model = _fitted(dataset, session=CoVisSettings(COVIS_MIN_COOC=2))
+    model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     history_np = np.array(["m1", "m2"], dtype=object)
     result = model.recommend("ghost-user", top_n=3, filter_viewed=True, history=history_np)
     assert result.strategy == Strategy.MODEL_REALTIME_WARM_USERS.value

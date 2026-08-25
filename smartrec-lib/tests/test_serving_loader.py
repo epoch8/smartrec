@@ -56,7 +56,7 @@ def _trained_set(dataset, *, with_session):
     config = ModelSetSettings(
         main=ALSSettings(**BASE),
         fallback=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
-        session=CoVisSettings(COVIS_MIN_COOC=2) if with_session else None,
+        realtime=CoVisSettings(COVIS_MIN_COOC=2) if with_session else None,
     )
     model_set = RecommenderModelSet(
         recsys_config=config,
@@ -82,7 +82,7 @@ def test_a_model_set_pickle_loads_as_a_model_set(triton_model_module, dataset, t
     loaded = triton_model_module.TritonPythonModel._load_model(model_name="als_covis_youtravel", load_dir=load_dir)
 
     assert isinstance(loaded, RecommenderModelSet)
-    assert loaded.session is not None
+    assert loaded.realtime is not None
     assert loaded.recommend("u1", top_n=3, filter_viewed=True).item_ids
 
 
@@ -95,7 +95,7 @@ def test_a_legacy_als_pickle_loads_as_an_adapted_model_set(triton_model_module, 
         "recsys_config": model_set.recsys_config.main,
         "model_hot_users": model_set.main.model_hot_users,
         "model_cold_users": model_set.fallback.model,
-        "covis": model_set.session,
+        "covis": model_set.realtime,
         "dataset": model_set.main.dataset,
         "item_id_map": model_set.main.item_id_map,
         "user_id_map": model_set.main.user_id_map,
@@ -112,7 +112,7 @@ def test_a_legacy_als_pickle_loads_as_an_adapted_model_set(triton_model_module, 
     # Adapted, not loaded as the old class: one routing path in the library.
     assert isinstance(loaded, RecommenderModelSet)
     assert loaded.main is not None and loaded.fallback is not None
-    assert loaded.session is not None
+    assert loaded.realtime is not None
     assert loaded.recommend("u1", top_n=3, filter_viewed=True, history=["m2", "m1"]).item_ids
 
 

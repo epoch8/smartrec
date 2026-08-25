@@ -36,16 +36,22 @@ class BlendSettings(BaseModel):
     Weights are named after the ROLES being fused, not after the models filling
     them. They were `ALS_WEIGHT`/`COVIS_WEIGHT` until 2026-08-22, which meant the
     generic fusion config named two specific algorithms and the fusion call had
-    to read `{"main": blend.ALS_WEIGHT, "session": blend.COVIS_WEIGHT}` - visibly
+    to read `{"main": blend.ALS_WEIGHT, ...: blend.COVIS_WEIGHT}` - visibly
     translating between the two vocabularies. Swap ALS for LightFM and the old
     names would have been actively wrong.
+
+    `REALTIME_WEIGHT` is deliberately not called `SESSION_WEIGHT`: that would
+    have been the third distinct meaning of "session weight" in this package,
+    next to `CoVisSettings.COVIS_SESSION_WEIGHTS` (a per-seed event multiplier)
+    and the `session_weight` argument of the co-occurrence kernel. See CLAUDE.md
+    section 4 - one concept, one name.
 
     Values come from the offline policy grid (EXPERIMENTS.md 2026-08-03):
     1.0 + 1.0 beat the main ranker alone by ~6% map@10.
     """
 
     MAIN_WEIGHT: float = 1.0
-    SESSION_WEIGHT: float = 1.0
+    REALTIME_WEIGHT: float = 1.0
     RRF_K: int = 60
 
 
@@ -56,7 +62,7 @@ _LEGACY_ALS_POPULAR_FIELDS = ("POPULARITY_STRATEGY", "POPULARITY_PERIOD")
 _LEGACY_ALS_COVIS_FIELDS = ("COVIS_TOP_K", "COVIS_MIN_COOC", "COVIS_SESSION_WEIGHTS")
 _LEGACY_ALS_BLEND_FIELDS = {
     "BLEND_ALS_WEIGHT": "MAIN_WEIGHT",
-    "BLEND_COVIS_WEIGHT": "SESSION_WEIGHT",
+    "BLEND_COVIS_WEIGHT": "REALTIME_WEIGHT",
     "BLEND_RRF_K": "RRF_K",
 }
 
@@ -131,7 +137,7 @@ class EASESettings(CommonRecommenderSettings):
 
 
 # A model that can rank the users it has a representation for. The main and
-# session roles below accept any of these, which is the whole point: swapping the
+# realtime roles below accept any of these, which is the whole point: swapping the
 # algorithm in a role is a change of TYPE, not of schema. Adding LightFM means
 # adding LightFMSettings here and to the class registry in recommender_model_set,
 # and touching nothing else.
@@ -143,13 +149,14 @@ class ModelSetSettings(BaseModel):
 
     An artifact is not one model: it is a ranker for the users it can represent,
     a fallback for everyone else, optionally something that scores the live
-    session, and the weights that fuse them.
+    realtime signal, and the weights that fuse them.
 
     **Each field is a ROLE and its value's type is the model filling it.** That
     is deliberate and it is the second half of a lesson learned twice:
 
     - `ALSSettings.covis` named a sibling model inside one ranker's config, so
-      "who serves the session" looked like an ALS hyperparameter (fixed 2026-08-22);
+      "who serves the realtime signal" looked like an ALS hyperparameter (fixed
+      2026-08-22);
     - then the fields here were `als`/`popular`/`covis`, i.e. named after the
       algorithms currently filling the roles. Putting LightFM in as the main
       ranker would have meant either a second field for the same role or a field
@@ -161,15 +168,21 @@ class ModelSetSettings(BaseModel):
     - `main` - ranks users it has a representation for. Required.
     - `fallback` - ranks everyone else. Required; there is always someone the
       main ranker cannot score.
-    - `session` - ranks from the live session. `None` means the artifact has no
-      session layer - exactly what the retired `SESSION_COVIS_ENABLED=False`
-      meant - and `main` then scores sessions with its own machinery.
-    - `blend` - fusion weights, read only when `session` is set.
+    - `realtime` - ranks from the live session events. `None` means the artifact
+      has no realtime layer - exactly what the retired `SESSION_COVIS_ENABLED=False`
+      meant - and `main` then scores the live events with its own machinery.
+    - `blend` - fusion weights, read only when `realtime` is set.
+
+    The role is called `realtime` because that is the word the published contract
+    already uses: the strategies this layer produces are `model_realtime_hot_users`
+    and `model_realtime_warm_users` (see `Strategy` and
+    api/docs/DEBUG_INFO_CODEC.md). It was briefly `session`, which left the config
+    and the wire disagreeing about the same thing.
 
     The two shipped artifacts are two shapes of this class: `als_youtravel` is
-    main+fallback, `als_covis_youtravel` adds session+blend. Per the offline
+    main+fallback, `als_covis_youtravel` adds realtime+blend. Per the offline
     research (EXPERIMENTS.md 2026-08-02/03) the blend beat the main ranker alone
-    by ~6% map@10, and co-visitation beat the item-similarity session path it
+    by ~6% map@10, and co-visitation beat the item-similarity realtime path it
     replaces by 4x.
 
     Plain BaseModel, not BaseSettings: composition is not env-driven, and this is
@@ -184,7 +197,7 @@ class ModelSetSettings(BaseModel):
 
     main: RankerSettings
     fallback: RankerSettings = Field(default_factory=PopularSettings)
-    session: Optional[RankerSettings] = None
+    realtime: Optional[RankerSettings] = None
     blend: BlendSettings = Field(default_factory=BlendSettings)
 
     @classmethod
@@ -211,7 +224,7 @@ class ModelSetSettings(BaseModel):
                 ALS_ALPHA=fields["ALS_ALPHA"],
             ),
             fallback=fields.get("popular") or PopularSettings(),
-            session=fields.get("covis"),
+            realtime=fields.get("covis"),
             blend=fields.get("blend") or BlendSettings(),
         )
 
