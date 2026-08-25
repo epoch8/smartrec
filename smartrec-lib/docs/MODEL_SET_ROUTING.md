@@ -42,6 +42,7 @@ Constraints carried over from production experience:
 | 2026-08-23 | **Fall-through on unused signal.** A route whose defining signal was not actually used by any contributing member does not bind; the request falls to the next applicable route. This makes label honesty a property of the interpreter instead of a hidden if. |
 | 2026-08-23 | **Empty results do not fall through.** An empty ranking is returned with the route's label. Filling an empty feed is the API layer's job (SmartFeed backfills from elastic); the artifact silently switching segments would hide signal problems. This preserves current prod semantics exactly. |
 | 2026-08-23 | **Fusion is rank-based (RRF) only.** Raw scores never cross a member boundary - co-occurrence counts, dot products and popularity counters are not comparable (the documented failure of the old `RecommenderOrchestrator`). |
+| 2026-08-25 | **No manifest artifacts, and no metadata sidecar either.** One dill per version stays the format. Of the four problems a manifest would solve, three dissolve on their own: the shape-sniffing loader becomes dead code once no flat artifact is left in either bucket, storing the dataset once saves nothing while there is one artifact, and a schema version does not actually prevent the silent-default failure - only running a real artifact through the real loader does, which is what the S3 gate is for. The fourth, provenance, is real but is served by the trainer's own log lines. Changing the artifact format costs a runtime repack plus a loader change under the §5.11 ordering, which is production risk for an ergonomic gain. Revisit only when several artifacts need to share one ALS blob. |
 
 ## The shape
 
@@ -185,9 +186,8 @@ and labels.
 - **Gate before any deploy**: load a real artifact pulled from S3 (not a
   synthetic fixture) through the adapter and verify all scenarios. A wrongly
   assembled member raises nothing - it just serves worse.
-- Manifest-based artifacts (manifest.json with schema version, config, git
-  sha, metrics + per-member state files + dataset stored once) remain the
-  planned next step, orthogonal to routing. Not in this change.
+- The artifact stays one dill per version. Splitting it into a manifest plus
+  per-member state files is rejected, not deferred - see the decision log.
 
 ## Extension recipes
 
@@ -224,8 +224,8 @@ consumer for it.
 2. The S3 real-artifact gate.
 3. Runtime repack, then retrain (§5.11 ordering), verify all four scenarios on
    the stand - same checklist as the 2026-08-21 verification.
-4. Only after that: manifest artifacts, `RecommenderRectools`, per-member
-   datasets - each as its own reviewed step.
+4. Only after that: `RecommenderRectools`, per-member datasets - each as its
+   own reviewed step.
 
 ## Non-goals
 
