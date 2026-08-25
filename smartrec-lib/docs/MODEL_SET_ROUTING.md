@@ -1,7 +1,7 @@
 # Model sets and routing
 
 **Status: DEFERRED (2026-08-24).** The owner chose to ship the simple
-role-field shape (`main`/`fallback`/`session`, PR #12) instead - the routing
+role-field shape (`main`/`fallback`/`realtime`, PR #12) instead - the routing
 table below was judged more machinery than the current two artifacts need.
 This document stays as the worked-out design for the day a trigger appears:
 a second add-on in one artifact, a second project, or a scenario the role

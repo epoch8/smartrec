@@ -12,8 +12,12 @@ belongs — is in [../CLAUDE.md](../CLAUDE.md). Read it before adding a module.
 - **`RecommenderModel`** base class: `train`, `recommend`, `calc_metrics`, plus
   (de)serialization to `model.pkl` from a local dir or S3 / Triton.
 - **Models:**
-  - `RecommenderALS` — main model (implicit ALS) with item-similarity, a nested
-    Popular sub-model for cold users, and an optional CoVis session layer.
+  - `RecommenderModelSet` — the composite. One artifact is a SET of models, and
+    this is the only place routing across visitor segments, fusion of two
+    rankings, and the `Strategy` vocabulary live.
+  - `RecommenderALS` — the main ranker (implicit ALS), which also carries the
+    item-similarity matrix derived from its own factors. It knows nothing about
+    its siblings or about segments.
   - `RecommenderPopular`, `RecommenderEASE`, `RecommenderCoVis` — same interface.
 - **Config objects:** `ModelSetSettings` (composition of one artifact),
   `ALSSettings`, `PopularSettings`, `EASESettings`,
@@ -45,28 +49,35 @@ from datetime import datetime
 
 import pandas as pd
 from rectools.dataset import Dataset
-from smartrec_lib.model import ALSSettings, ModelSetSettings
+from smartrec_lib.model import ALSSettings
 from smartrec_lib.recommenders.recommender_als import RecommenderALS
 
+# Deliberately more than a handful of rows: with three interactions and
+# filter_viewed=True there is at most one item left to recommend, and asking for
+# top_n=10 then pads the answer with a repeated item at score 0.0. That padding is
+# an artefact of a degenerate fixture, not of serving - a real artifact with ~9.6k
+# items returns exactly as many distinct items as it can score.
 interactions = pd.DataFrame({
-    "user_id": [1, 1, 2],
-    "item_id": [10, 20, 30],
-    "weight": [1.0, 1.0, 1.0],
-    "datetime": pd.to_datetime(["2024-10-01", "2024-10-02", "2024-10-03"]),
+    "user_id": [1, 1, 2, 2, 3, 3, 3, 4, 4],
+    "item_id": [10, 20, 10, 30, 20, 30, 40, 30, 50],
+    "weight":  [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "datetime": pd.to_datetime([
+        "2024-10-01", "2024-10-02", "2024-10-02", "2024-10-03",
+        "2024-10-03", "2024-10-04", "2024-10-04", "2024-10-05", "2024-10-05",
+    ]),
 })
 
+# A member takes its OWN leaf config; only the set takes ModelSetSettings.
 model = RecommenderALS(
-    recsys_config=ModelSetSettings(
-        als=ALSSettings(
-            ALS_FACTORS=64, ALS_ITERATIONS=15,
-            ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
-        ),
+    recsys_config=ALSSettings(
+        ALS_FACTORS=16, ALS_ITERATIONS=15,
+        ALS_REGULARIZATION_FACTOR=0.05, ALS_ALPHA=2,
     ),
     model_name="als_model",
     model_version=datetime.now().strftime("%Y%m%d%H%M%S"),
 )
 model.train(Dataset.construct(interactions))
-recommendations = model.recommend(user_ids=1, top_n=10, filter_viewed=True)
+recommendations = model.recommend(user_ids=1, top_n=3, filter_viewed=True)
 ```
 
 ## Export to Triton
