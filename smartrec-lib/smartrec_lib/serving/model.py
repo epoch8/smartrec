@@ -4,6 +4,7 @@ import sys
 import logging
 from time import perf_counter
 
+import dill
 import numpy as np
 import pandas as pd
 import triton_python_backend_utils as pb_utils
@@ -12,6 +13,7 @@ from smartrec_lib.recommenders import (
     RecommenderALS,
     RecommenderCoVis,
     RecommenderEASE,
+    RecommenderModelSet,
     RecommenderPopular,
 )
 
@@ -56,6 +58,7 @@ class TritonPythonModel:
     @staticmethod
     def _configure_python_logging_bridge() -> None:
         recommender_logger_names = (
+            "Model Set",
             "ALS Model",
             "Popular Model",
             "EASE Model",
@@ -74,6 +77,50 @@ class TritonPythonModel:
             target_logger.addHandler(handler)
             target_logger.setLevel(logging.INFO)
             target_logger.propagate = False
+
+    @staticmethod
+    def _load_model(model_name: str, load_dir: str):
+        """Pick the class from the PICKLE'S SHAPE, then from the artifact name.
+
+        The shape check has to come first, and this is why: an artifact name
+        cannot tell the two generations apart. `als_covis_youtravel` was a
+        RecommenderALS __dict__ before 2026-08-22 and is a RecommenderModelSet
+        __dict__ after, under the SAME name - the name is a public query
+        parameter on the feed endpoint and cannot be changed (CLAUDE.md §5.9).
+        A model set is recognised by the members it carries; anything else is a
+        legacy ALS artifact and gets adapted into a set so there is exactly one
+        routing path in the library.
+
+        The name ladder below only decides which single-model class to use for
+        the artifacts that were never sets. It stays an ordered elif chain:
+        substring matching bites compound names, so the most specific name must
+        come first - the old independent ifs let a bare `covis` branch overwrite
+        the `als_covis` one and served an empty-neighbors RecommenderCoVis.
+        """
+        with open(os.path.join(load_dir, "model.pkl"), "rb") as file:
+            state = dill.load(file)
+
+        if isinstance(state, dict) and ("main" in state or "fallback" in state):
+            instance = RecommenderModelSet()
+            instance.__dict__.update(state)
+            logger.info("Loaded %s as a model set", model_name)
+            return instance
+
+        if isinstance(state, dict) and "model_hot_users" in state:
+            logger.info("Loaded %s as a LEGACY ALS artifact, adapting to a model set", model_name)
+            return RecommenderModelSet.from_legacy_als_state(state)
+
+        if "popular" in model_name:
+            single = RecommenderPopular()
+        elif "ease" in model_name:
+            single = RecommenderEASE()
+        elif "covis" in model_name:
+            single = RecommenderCoVis()
+        else:
+            single = RecommenderALS()
+        single.__dict__.update(state)
+        logger.info("Loaded %s as %s", model_name, type(single).__name__)
+        return single
 
     def initialize(self, args):
         """`initialize` is called only once when the model is being loaded.
@@ -118,28 +165,14 @@ class TritonPythonModel:
 
         model_load_start = perf_counter()
         model_name = self.model_config["name"]
-        # Ordered resolution: substring matching bites compound names, so the
-        # chain is a single elif ladder with the most specific names first.
-        # "als_covis_youtravel" MUST load as RecommenderALS (the covis session
-        # layer lives inside it) - the old independent ifs let the bare covis
-        # branch overwrite it, serving an empty-neighbors RecommenderCoVis.
-        if "als_covis" in model_name:
-            self.model = RecommenderALS.load_model(load_dir=script_path)
-        elif "als" in model_name:
-            self.model = RecommenderALS.load_model(load_dir=script_path)
-        elif "popular" in model_name:
-            self.model = RecommenderPopular.load_model(load_dir=script_path)
-        elif "ease" in model_name:
-            self.model = RecommenderEASE.load_model(load_dir=script_path)
-        elif "covis" in model_name:
-            self.model = RecommenderCoVis.load_model(load_dir=script_path)
+        self.model = self._load_model(model_name=model_name, load_dir=script_path)
         model_load_ms = (perf_counter() - model_load_start) * 1000
 
         cache_warm_ms = 0.0
-        if "als" in self.model_config["name"] and hasattr(self.model, "_ensure_user_item_matrix_binary"):
+        warm = getattr(self.model, "warm_caches", None)
+        if warm is not None:
             cache_warm_start = perf_counter()
-            self.model._ensure_lookup_caches()
-            self.model._ensure_user_item_matrix_binary()
+            warm()
             cache_warm_ms = (perf_counter() - cache_warm_start) * 1000
 
         init_ms = (perf_counter() - init_start) * 1000

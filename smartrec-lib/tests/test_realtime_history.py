@@ -11,8 +11,8 @@ import pytest
 from rectools import Columns
 from rectools.dataset import Dataset
 
-from smartrec_lib.model import ALSSettings, Strategy
-from smartrec_lib.recommenders.recommender_als import RecommenderALS
+from smartrec_lib.model import ALSSettings, ModelSetSettings, Strategy
+from smartrec_lib.recommenders import RecommenderModelSet
 
 
 @pytest.fixture
@@ -38,14 +38,16 @@ def dataset(interactions_df):
 @pytest.fixture
 def trained_model(dataset):
     """Create and train ALS model."""
-    config = ALSSettings(
-        ALS_FACTORS=16,
-        ALS_ITERATIONS=5,
-        ALS_REGULARIZATION_FACTOR=0.01,
-        ALS_ALPHA=1,
+    config = ModelSetSettings(
+        main=ALSSettings(
+            ALS_FACTORS=16,
+            ALS_ITERATIONS=5,
+            ALS_REGULARIZATION_FACTOR=0.01,
+            ALS_ALPHA=1,
+        )
     )
 
-    model = RecommenderALS(
+    model = RecommenderModelSet(
         recsys_config=config,
         model_name="test_als",
         model_version="test_v1",
@@ -485,14 +487,16 @@ if __name__ == "__main__":
 
     dataset = Dataset.construct(interactions_df)
 
-    config = ALSSettings(
-        ALS_FACTORS=16,
-        ALS_ITERATIONS=5,
-        ALS_REGULARIZATION_FACTOR=0.01,
-        ALS_ALPHA=1,
+    config = ModelSetSettings(
+        main=ALSSettings(
+            ALS_FACTORS=16,
+            ALS_ITERATIONS=5,
+            ALS_REGULARIZATION_FACTOR=0.01,
+            ALS_ALPHA=1,
+        )
     )
 
-    model = RecommenderALS(
+    model = RecommenderModelSet(
         recsys_config=config,
         model_name="test_als",
         model_version="test_v1",

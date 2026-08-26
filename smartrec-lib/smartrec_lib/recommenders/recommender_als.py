@@ -16,13 +16,11 @@ from rectools.metrics import (
     novelty,
 )
 from rectools.model_selection import TimeRangeSplitter, cross_validate
-from rectools.models import ImplicitALSWrapperModel, PopularModel
+from rectools.models import ImplicitALSWrapperModel
 from scipy import sparse
 
 from smartrec_lib.model import ALSSettings, RecomItems, Strategy
-from smartrec_lib.kernels.fusion import rrf_fuse
 from smartrec_lib.recommenders.base import RecommenderModel
-from smartrec_lib.recommenders.recommender_covis import RecommenderCoVis
 from smartrec_lib.save_and_load_triton_models import (
     clean_old_model_versions,
     upload_model_files,
@@ -33,6 +31,21 @@ logger.setLevel(logging.INFO)
 
 
 class RecommenderALS(RecommenderModel):
+    """Matrix-factorisation ranker. Serves the users it has embeddings for.
+
+    A MEMBER of a model set, and deliberately ignorant of everything above it:
+    it does not know that cold users get popularity, that a session may be
+    scored by co-visitation, or that its answers are labelled by visitor
+    segment. It answers two questions - "can I score this user" (`can_serve`)
+    and "here are my candidates" - and `RecommenderModelSet` decides the rest.
+
+    Until 2026-08-22 this class WAS the whole feed: it owned a PopularModel for
+    cold users, an optional RecommenderCoVis for sessions, the fusion weights,
+    the routing across all four visitor segments and the Strategy vocabulary.
+    That is why `als_covis_youtravel` was "the ALS artifact with extras" instead
+    of what it actually is - a set of models behind one name.
+    """
+
     model_architecture = "als"
 
     def __init__(
@@ -47,16 +60,28 @@ class RecommenderALS(RecommenderModel):
         self.model_name = model_name or "-"
         self.recsys_config = recsys_config
 
-        # base and feature models
         self.model_hot_users: ImplicitALSWrapperModel = None
-        self.model_cold_users: PopularModel = None
         self.dataset: Dataset = None  # might take unnecessary memory
         self.item_id_map: IdMap = None
         self.user_id_map: IdMap = None
         self.user_item_matrix_binary = None
         self.implicit_neginf_score = None
-        # Co-visitation session layer, trained iff recsys_config.covis is set
-        self.covis: Optional[RecommenderCoVis] = None
+
+    def can_serve(self, user_ids: Any) -> bool:
+        """True when this user has an embedding, i.e. was in the training data."""
+        self._ensure_lookup_caches()
+        return user_ids in self.user_id_map.external_ids and user_ids in self.user_ids_hot
+
+    def warm_caches(self) -> None:
+        """Build the lazy lookup caches ahead of the first request."""
+        self._ensure_lookup_caches()
+        self._ensure_user_item_matrix_binary()
+
+    def known_items(self, items_to_recommend: Optional[List[Any]]) -> Optional[List[Any]]:
+        """Restrict a candidate list to items this model can actually score."""
+        if items_to_recommend is None:
+            return None
+        return [item for item in items_to_recommend if item in self.item_ids_hot]
 
     @classmethod
     def compute_item_similarity(cls, model: ImplicitALSWrapperModel, k_max_values: int = 100) -> np.ndarray:
@@ -97,9 +122,6 @@ class RecommenderALS(RecommenderModel):
     def _ensure_lookup_caches(self) -> None:
         if not hasattr(self, "user_item_matrix_binary"):
             self.user_item_matrix_binary = None
-        # Artifacts pickled before the covis session layer existed lack the attr.
-        if not hasattr(self, "covis"):
-            self.covis = None
         if not hasattr(self, "implicit_neginf_score") or self.implicit_neginf_score is None:
             self.implicit_neginf_score = float(
                 np.asarray(
@@ -121,13 +143,17 @@ class RecommenderALS(RecommenderModel):
             build_ms = (perf_counter() - build_start) * 1000
             logger.info(f"[ALS CACHE] user_item_matrix_binary_built={build_ms:.1f}ms")
 
-    def _recommend_hot_user_candidates(
+    def hot_user_candidates(
         self,
         user_ids: Any,
         top_n: int,
         filter_viewed: bool,
         items_to_recommend: Optional[List[int]],
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Raw ALS candidates: (internal ids, external ids, scores).
+
+        Public because the model set fuses these with another member's ranking.
+        """
         self._ensure_user_item_matrix_binary()
 
         user_id_internal = int(self.user_id_map.convert_to_internal([user_ids])[0])
@@ -164,18 +190,19 @@ class RecommenderALS(RecommenderModel):
         assert self.recsys_config is not None
 
         self.dataset = dataset
+        als = self.recsys_config
 
         logger.info("Fitting model...")
 
-        np.random.seed(self.recsys_config.RECOMMENDER_RANDOM_STATE)
+        np.random.seed(als.RECOMMENDER_RANDOM_STATE)
 
         self.model_hot_users = ImplicitALSWrapperModel(
             AlternatingLeastSquares(
-                factors=self.recsys_config.ALS_FACTORS,
-                regularization=self.recsys_config.ALS_REGULARIZATION_FACTOR,
-                iterations=self.recsys_config.ALS_ITERATIONS,
-                alpha=self.recsys_config.ALS_ALPHA,
-                random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE,
+                factors=als.ALS_FACTORS,
+                regularization=als.ALS_REGULARIZATION_FACTOR,
+                iterations=als.ALS_ITERATIONS,
+                alpha=als.ALS_ALPHA,
+                random_state=als.RECOMMENDER_RANDOM_STATE,
             ),
             fit_features_together=False,  # way to fit paired features
         )
@@ -184,30 +211,11 @@ class RecommenderALS(RecommenderModel):
         self.item_id_map = dataset.item_id_map
         self.item_similarity = self.compute_item_similarity(self.model_hot_users)
 
-        self.model_cold_users = PopularModel(
-            popularity=self.recsys_config.popular.POPULARITY_STRATEGY,
-            period=self.recsys_config.popular.POPULARITY_PERIOD,
-        )
-        self.model_cold_users.fit(dataset)
-
         self.user_ids_hot = set(self.dataset.user_id_map.convert_to_external(self.dataset.interactions.df.user_id))
         # Some item_ids may not be in interactions
         self.item_ids_hot = set(self.dataset.item_id_map.convert_to_external(self.dataset.interactions.df.item_id))
 
-        # Optional co-visitation session layer: replaces the two weak item-sim
-        # session paths (see _recommend_hot_user_with_covis_blend and the covis
-        # branch in recommend_unknown_user_with_history). Absent by default.
-        self.covis = None
-        if self.recsys_config.covis is not None:
-            self.covis = RecommenderCoVis(
-                recsys_config=self.recsys_config.covis,
-                model_name=self.model_name,
-                model_version=self.model_version,
-            )
-            self.covis.train(dataset)
-            logger.info("Session covis layer trained (recsys_config.covis is set).")
-
-        logger.info("Base models trained.")
+        logger.info("ALS trained.")
 
     def recommend(
         self,
@@ -216,7 +224,16 @@ class RecommenderALS(RecommenderModel):
         filter_viewed: bool = True,
         items_to_recommend: Optional[List[int]] = None,
         history: Optional[List[int]] = None,
-    ) -> RecomItems:  # Return type is a RecomItems
+    ) -> RecomItems:
+        """Rank for a user this model has an embedding for.
+
+        `history` is accepted for interface compatibility and IGNORED - session
+        scoring is `recommend_hot_user_with_session` / `recommend_from_session`,
+        and choosing between them is the model set's job, not this method's.
+        Callers that are not the model set should ask `can_serve` first; an
+        unknown user gets an empty result rather than a fallback, because
+        picking a fallback is not this model's decision.
+        """
         total_start = perf_counter()
         self._ensure_lookup_caches()
 
@@ -227,103 +244,30 @@ class RecommenderALS(RecommenderModel):
                 strategy=Strategy.NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY,
             )
 
+        if not self.can_serve(user_ids):
+            logger.info(f"[ALS] no embedding for user={user_ids}, returning empty")
+            return RecomItems(item_ids=[], scores=[], strategy=Strategy.MODEL_HOT_USERS.value)
+
+        als_start = perf_counter()
+        _, item_ids_external, scores = self.hot_user_candidates(
+            user_ids=user_ids,
+            top_n=top_n,
+            filter_viewed=filter_viewed,
+            items_to_recommend=self.known_items(items_to_recommend),
+        )
+        als_ms = (perf_counter() - als_start) * 1000
+
+        total_ms = (perf_counter() - total_start) * 1000
         logger.info(
-            f"Predicting for user {user_ids}, history={'present' if (history is not None and len(history) > 0) else 'absent'}"
+            f"[ALS HOT] user={user_ids}, top_n={top_n} | "
+            f"total={total_ms:.1f}ms | als={als_ms:.1f}ms | results={len(item_ids_external)}"
         )
 
-        # Filter items_to_recommend to only those that exist in our training data
-        # If items_to_recommend is None, we don't filter and show all items
-        filter_start = perf_counter()
-        items_to_recommend_filtered = None
-        if items_to_recommend is not None:
-            items_to_recommend_filtered = [
-                item_to_recommend for item_to_recommend in items_to_recommend if item_to_recommend in self.item_ids_hot
-            ]
-        filter_ms = (perf_counter() - filter_start) * 1000
-
-        # Determine user type and check for real-time history
-        is_hot_user = user_ids in self.user_id_map.external_ids and user_ids in self.user_ids_hot
-        has_session_history = history is not None and len(history) > 0
-
-        # HOT USER (in training data)
-        if is_hot_user:
-            if has_session_history:
-                # Hot user + real-time events = enrich ALS with recent behavior
-                logger.info(f"Hot user with real-time enrichment: user={user_ids}, history_size={len(history)}")
-                return self._recommend_hot_user_with_session(
-                    user_ids=user_ids,
-                    top_n=top_n,
-                    filter_viewed=filter_viewed,
-                    items_to_recommend=items_to_recommend_filtered,
-                    history=history,
-                )
-            else:
-                # Standard hot user with ALS
-                als_start = perf_counter()
-                _, item_ids_external, scores = self._recommend_hot_user_candidates(
-                    user_ids=user_ids,
-                    top_n=top_n,
-                    filter_viewed=filter_viewed,
-                    items_to_recommend=items_to_recommend_filtered,
-                )
-                als_ms = (perf_counter() - als_start) * 1000
-
-                total_ms = (perf_counter() - total_start) * 1000
-                logger.info(
-                    f"[ALS HOT] user={user_ids}, top_n={top_n} | "
-                    f"total={total_ms:.1f}ms | filter={filter_ms:.1f}ms, als={als_ms:.1f}ms | "
-                    f"results={len(item_ids_external)}"
-                )
-
-                return RecomItems(
-                    item_ids=[str(item_id) for item_id in item_ids_external],
-                    scores=scores.astype(float).tolist(),
-                    strategy=Strategy.MODEL_HOT_USERS.value,
-                )
-
-        # WARM USER (new user with real-time events)
-        elif has_session_history:
-            logger.info(f"Warm user with real-time history: user={user_ids}, history_size={len(history)}")
-            return self.recommend_unknown_user_with_history(
-                user_ids=user_ids,
-                top_n=top_n,
-                filter_viewed=filter_viewed,
-                items_to_recommend=items_to_recommend,
-                history=history,
-            )
-
-        # COLD USER (new user without events)
-        else:
-            cold_start = perf_counter()
-            recos_df = self.model_cold_users.recommend(
-                users=[user_ids],
-                dataset=self.dataset,
-                k=top_n,
-                filter_viewed=filter_viewed,
-                items_to_recommend=(
-                    items_to_recommend_filtered
-                    if items_to_recommend_filtered is None
-                    else list(items_to_recommend_filtered)
-                ),
-            )
-            cold_ms = (perf_counter() - cold_start) * 1000
-
-            sort_start = perf_counter()
-            recos_df = recos_df.sort_values(["user_id", "score"], ascending=False).reset_index(drop=True)
-            sort_ms = (perf_counter() - sort_start) * 1000
-
-            total_ms = (perf_counter() - total_start) * 1000
-            logger.info(
-                f"[ALS COLD] user={user_ids}, top_n={top_n} | "
-                f"total={total_ms:.1f}ms | filter={filter_ms:.1f}ms, popular={cold_ms:.1f}ms, sort={sort_ms:.1f}ms | "
-                f"results={len(recos_df)}"
-            )
-
-            return RecomItems(
-                item_ids=recos_df.item_id.astype(str).tolist(),
-                scores=recos_df.score.tolist(),
-                strategy=Strategy.MODEL_COLD_USERS.value,
-            )
+        return RecomItems(
+            item_ids=[str(item_id) for item_id in item_ids_external],
+            scores=scores.astype(float).tolist(),
+            strategy=Strategy.MODEL_HOT_USERS.value,
+        )
 
     @staticmethod
     def _parse_weighted_history(history: List[str]) -> tuple[List[str], List[float]]:
@@ -359,86 +303,25 @@ class RecommenderALS(RecommenderModel):
 
         return item_ids, weights
 
-    def _session_covis_active(self) -> bool:
-        """True when the covis session layer was trained and is usable."""
-        self._ensure_lookup_caches()
-        covis = getattr(self, "covis", None)
-        return covis is not None and bool(getattr(covis, "neighbors", None))
+    def viewed_external(self, user_ids: Any) -> set:
+        """External ids of everything the user interacted with in training.
 
-    def _viewed_external(self, user_ids: Any) -> set:
-        """External ids of everything the user interacted with in training."""
+        Public because a fused ranking has to honour `filter_viewed` too, and
+        only this model knows what the user was seen with during training.
+        """
         self._ensure_user_item_matrix_binary()
         user_internal = int(self.user_id_map.convert_to_internal([user_ids])[0])
         viewed_internal = self.user_item_matrix_binary[user_internal].indices
         return {str(item) for item in self.item_id_map.convert_to_external(viewed_internal)}
 
-    def _recommend_hot_user_with_covis_blend(
-        self,
-        user_ids: Any,
-        top_n: int,
-        filter_viewed: bool,
-        items_to_recommend: Optional[List[Any]],
-        history: List[str],
-    ) -> RecomItems:
-        """Hot user + session: weighted RRF blend of pure ALS and co-visitation.
-
-        Blend weights come from the offline policy grid (EXPERIMENTS.md
-        2026-08-03): als=1.0 + covis=1.0 beat pure ALS by ~6% map@10 on warm
-        users. Both sources are overfetched 2x so the rank fusion has real
-        overlap to work with before the final cut to top_n.
-        """
-        blend = self.recsys_config.blend
-        fetch_n = top_n * 2
-        covis_result = self.covis.recommend(
-            user_ids,
-            top_n=fetch_n,
-            filter_viewed=filter_viewed,
-            items_to_recommend=items_to_recommend,
-            history=history,
-        )
-        _, als_items_external, als_scores = self._recommend_hot_user_candidates(
-            user_ids=user_ids,
-            top_n=fetch_n,
-            filter_viewed=filter_viewed,
-            items_to_recommend=items_to_recommend,
-        )
-        als_list = [str(item) for item in als_items_external]
-
-        if not covis_result.item_ids:
-            logger.info(f"[ALS_COVIS BLEND] covis empty, serving pure ALS: user={user_ids}")
-            return RecomItems(
-                item_ids=als_list[:top_n],
-                scores=als_scores.astype(float).tolist()[:top_n],
-                strategy=Strategy.MODEL_HOT_USERS.value,
-            )
-
-        fused = rrf_fuse(
-            {"als": als_list, "covis": list(covis_result.item_ids)},
-            {"als": blend.ALS_WEIGHT, "covis": blend.COVIS_WEIGHT},
-            rrf_k=blend.RRF_K,
-        )
-        # CoVis only filters its own session seed; drop training-viewed items so
-        # filter_viewed semantics stay identical to the pure-ALS path.
-        exclude = self._viewed_external(user_ids) if filter_viewed else set()
-        items = [item for item, _ in fused if item not in exclude][:top_n]
-        scores = [1.0 / rank for rank in range(1, len(items) + 1)]
-        logger.info(
-            f"[ALS_COVIS BLEND] user={user_ids} | als={len(als_list)} covis={len(covis_result.item_ids)} "
-            f"-> fused={len(items)}"
-        )
-        # Same segment and same signal as the ALS item-sim session path this
-        # replaces - a hot user scored with their live session - so it keeps that
-        # label. Which algorithm produced it is already told by model_name.
-        return RecomItems(item_ids=items, scores=scores, strategy=Strategy.MODEL_REALTIME_HOT_USERS.value)
-
-    def _recommend_hot_user_with_session(
+    def recommend_hot_user_with_session(
         self,
         user_ids: int,
         top_n: int,
         filter_viewed: bool,
         items_to_recommend: Optional[List[int]],
         history: List[str],
-    ) -> RecomItems:
+    ) -> tuple[RecomItems, bool]:
         """
         Recommend for hot users enriched with real-time session history.
 
@@ -455,25 +338,12 @@ class RecommenderALS(RecommenderModel):
         Returns:
             RecomItems with MODEL_REALTIME_HOT_USERS strategy
         """
-        # Covis session layer (recsys_config.covis): replace the 70/30
-        # ALS + item-sim mix with the RRF blend of ALS and co-visitation -
-        # the item-sim half measured below plain popularity offline
-        # (EXPERIMENTS.md 2026-08-02/03).
-        if self._session_covis_active():
-            return self._recommend_hot_user_with_covis_blend(
-                user_ids=user_ids,
-                top_n=top_n,
-                filter_viewed=filter_viewed,
-                items_to_recommend=items_to_recommend,
-                history=history,
-            )
-
         total_start = perf_counter()
         timing = {}
 
         # Get ALS recommendations
         als_start = perf_counter()
-        als_item_ids_internal, als_item_ids_external, als_scores = self._recommend_hot_user_candidates(
+        als_item_ids_internal, als_item_ids_external, als_scores = self.hot_user_candidates(
             user_ids=user_ids,
             top_n=top_n * 2,  # Get more for blending
             filter_viewed=filter_viewed,
@@ -482,11 +352,7 @@ class RecommenderALS(RecommenderModel):
         timing["als_recommend_ms"] = (perf_counter() - als_start) * 1000
 
         if len(als_item_ids_internal) == 0:
-            return RecomItems(
-                item_ids=[],
-                scores=[],
-                strategy=Strategy.MODEL_HOT_USERS.value,
-            )
+            return RecomItems(item_ids=[], scores=[], strategy=None), False
 
         # Parse weighted history
         parse_start = perf_counter()
@@ -517,10 +383,15 @@ class RecommenderALS(RecommenderModel):
         if len(valid_items_for_convert) == 0:
             # No valid history - fall back to standard ALS
             logger.warning(f"Hot user {user_ids} has invalid history, using standard ALS")
-            return RecomItems(
-                item_ids=[str(item_id) for item_id in als_item_ids_external[:top_n]],
-                scores=als_scores[:top_n].astype(float).tolist(),
-                strategy=Strategy.MODEL_HOT_USERS.value,  # Fallback to standard
+            # No usable seed: this is a plain ALS answer, and saying otherwise
+            # would mislabel the segment. The caller names it accordingly.
+            return (
+                RecomItems(
+                    item_ids=[str(item_id) for item_id in als_item_ids_external[:top_n]],
+                    scores=als_scores[:top_n].astype(float).tolist(),
+                    strategy=None,
+                ),
+                False,
             )
 
         # Батчевая конвертация
@@ -570,20 +441,23 @@ class RecommenderALS(RecommenderModel):
             f"als_candidates={len(als_item_ids_internal)}, final={len(top_indices)}"
         )
 
-        return RecomItems(
-            item_ids=[str(als_item_ids_external[i]) for i in top_indices],
-            scores=[float(blended[i]) for i in top_indices],
-            strategy=Strategy.MODEL_REALTIME_HOT_USERS.value,
+        return (
+            RecomItems(
+                item_ids=[str(als_item_ids_external[i]) for i in top_indices],
+                scores=[float(blended[i]) for i in top_indices],
+                strategy=None,
+            ),
+            True,
         )
 
-    def recommend_unknown_user_with_history(
+    def recommend_from_session(
         self,
         user_ids: int,
         history: List[str],
         top_n: int = 20,
         filter_viewed: bool = True,
         items_to_recommend: Optional[List[int]] = None,
-    ) -> RecomItems:
+    ) -> tuple[RecomItems, bool]:
         """
         Recommend items for warm users (users with history but not in training data).
         Uses item-to-item similarity based on user's history.
@@ -598,30 +472,6 @@ class RecommenderALS(RecommenderModel):
         Returns:
             RecomItems object with item_ids, scores, and strategy
         """
-        # Covis session layer (recsys_config.covis): co-visitation instead of
-        # the ALS item-sim path, which measured below plain popularity offline
-        # while covis was 4x better (EXPERIMENTS.md 2026-08-02).
-        if self._session_covis_active():
-            covis_result = self.covis.recommend(
-                user_ids,
-                top_n=top_n,
-                filter_viewed=filter_viewed,
-                items_to_recommend=items_to_recommend,
-                history=history,
-            )
-            if covis_result.item_ids:
-                logger.info(f"[ALS SESSION->COVIS] user={user_ids} -> covis ({len(covis_result.item_ids)} items)")
-                return RecomItems(
-                    item_ids=list(covis_result.item_ids),
-                    scores=list(covis_result.scores),
-                    # Unknown visitor scored from their live session - the same
-                    # segment and signal the item-sim path reported, so the same
-                    # label. Note RecommenderCoVis returns this value too, so the
-                    # standalone covis_youtravel artifact agrees.
-                    strategy=Strategy.MODEL_REALTIME_WARM_USERS.value,
-                )
-            logger.info(f"[ALS SESSION->COVIS] covis empty, falling back to item-sim: user={user_ids}")
-
         total_start = perf_counter()
         timing = {}
 
@@ -637,11 +487,15 @@ class RecommenderALS(RecommenderModel):
                 items_enc_v = np.zeros((1, self.model_hot_users.model.item_factors.shape[0]))
                 items_enc_v[:, items_enc] = 1
             else:
-                # No valid items to recommend
-                return RecomItems(
-                    item_ids=[],
-                    scores=[],
-                    strategy=Strategy.NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY,
+                # Nothing in the candidate list is scorable by this model.
+                # Distinct from "no answer": the caller keeps this label.
+                return (
+                    RecomItems(
+                        item_ids=[],
+                        scores=[],
+                        strategy=Strategy.NO_STRATEGY_ITEMS_TO_RECOMMEND_FILTERED_IS_EMPTY.value,
+                    ),
+                    False,
                 )
         timing["items_filter_ms"] = (perf_counter() - items_start) * 1000
 
@@ -677,11 +531,7 @@ class RecommenderALS(RecommenderModel):
                 f"History items: {history_items[:5]}... "
                 f"Known items: {len(self.item_id_map.external_ids)}"
             )
-            return RecomItems(
-                item_ids=[],
-                scores=[],
-                strategy=Strategy.MODEL_REALTIME_WARM_USERS.value,
-            )
+            return RecomItems(item_ids=[], scores=[], strategy=None), False
 
         # Батчевая конвертация вместо цикла
         history_enc_list = self.item_id_map.convert_to_internal(valid_items_for_convert)
@@ -770,10 +620,13 @@ class RecommenderALS(RecommenderModel):
             f"results={len(nearest_item_ids_enc)}"
         )
 
-        return RecomItems(
-            item_ids=[str(item_id) for item_id in item_ids_external],
-            scores=nearest_scores.tolist(),
-            strategy=Strategy.MODEL_REALTIME_WARM_USERS.value,
+        return (
+            RecomItems(
+                item_ids=[str(item_id) for item_id in item_ids_external],
+                scores=nearest_scores.tolist(),
+                strategy=None,
+            ),
+            True,
         )
 
     def save_model_triton(self, base_s3_url: Pathy, num_to_keep: int) -> None:
@@ -808,7 +661,9 @@ class RecommenderALS(RecommenderModel):
         return None
 
     def calc_metrics(self, k: int, dataset: Dataset, n_splits: int = 3) -> Dict[str, Any]:
+        """Cross-validate THIS model. The set aggregates its members' metrics."""
         assert self.recsys_config is not None
+        als = self.recsys_config
 
         metrics = {
             f"serendipity@{k}": Serendipity(k=k),
@@ -822,17 +677,13 @@ class RecommenderALS(RecommenderModel):
         models = {
             "ALS_MODEL": ImplicitALSWrapperModel(
                 AlternatingLeastSquares(
-                    factors=self.recsys_config.ALS_FACTORS,
-                    regularization=self.recsys_config.ALS_REGULARIZATION_FACTOR,
-                    iterations=self.recsys_config.ALS_ITERATIONS,
-                    alpha=self.recsys_config.ALS_ALPHA,
-                    random_state=self.recsys_config.RECOMMENDER_RANDOM_STATE,
+                    factors=als.ALS_FACTORS,
+                    regularization=als.ALS_REGULARIZATION_FACTOR,
+                    iterations=als.ALS_ITERATIONS,
+                    alpha=als.ALS_ALPHA,
+                    random_state=als.RECOMMENDER_RANDOM_STATE,
                 ),
                 fit_features_together=False,  # way to fit paired features
-            ),
-            "POPULARITY_MODEL": PopularModel(
-                popularity=self.recsys_config.popular.POPULARITY_STRATEGY,
-                period=self.recsys_config.popular.POPULARITY_PERIOD,
             ),
         }
 

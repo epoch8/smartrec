@@ -1,11 +1,16 @@
-"""Tests for the explicit-composition config shape and for loading artifacts
-that were pickled with the OLD flat shape.
+"""Tests for the model-set config shape and for loading artifacts pickled with
+either of the two older shapes.
 
-`recsys_config` is pickled inside every model.pkl in S3, so a prod artifact
-trained before the composition refactor must still unpickle and serve. The
-legacy pickles are reproduced here by a stand-in class whose `__reduce__`
-rebuilds a real ALSSettings from a legacy `__getstate__` payload - that is
-exactly the path CPython takes when it unpickles a pre-refactor artifact.
+`recsys_config` is pickled inside every model.pkl in S3, so an artifact trained
+before composition moved to `ModelSetSettings` must still unpickle and serve.
+Two older shapes exist and both are covered here:
+
+1. flat - one ALSSettings carrying POPULARITY_*/COVIS_*/BLEND_* fields directly;
+2. nested - one ALSSettings carrying `popular`/`covis`/`blend` sub-configs.
+
+The legacy pickles are reproduced by a stand-in class whose `__reduce__` rebuilds
+a real ALSSettings from a legacy `__getstate__` payload - exactly the path CPython
+takes when it unpickles a pre-refactor artifact.
 """
 
 import pickle
@@ -14,8 +19,8 @@ from datetime import timedelta
 import dill
 import pytest
 
-from smartrec_lib.model import ALSSettings, BlendSettings, CoVisSettings, PopularSettings, Strategy
-from smartrec_lib.recommenders import RecommenderALS, RecommenderCoVis
+from smartrec_lib.model import ALSSettings, BlendSettings, CoVisSettings, ModelSetSettings, PopularSettings, Strategy
+from smartrec_lib.recommenders import RecommenderALS, RecommenderCoVis, RecommenderModelSet, RecommenderPopular
 
 BASE = dict(
     ALS_ITERATIONS=2,
@@ -81,16 +86,16 @@ def _legacy_config(**overrides):
 
 
 def test_composition_defaults_to_no_session_layer():
-    config = ALSSettings(**BASE)
-    assert config.covis is None
-    assert isinstance(config.popular, PopularSettings)
+    config = ModelSetSettings(main=ALSSettings(**BASE))
+    assert config.realtime is None
+    assert isinstance(config.fallback, PopularSettings)
     assert isinstance(config.blend, BlendSettings)
 
 
 def test_covis_presence_is_the_switch():
-    config = ALSSettings(**BASE, covis=CoVisSettings(COVIS_MIN_COOC=3, COVIS_TOP_K=7))
-    assert config.covis.COVIS_MIN_COOC == 3
-    assert config.covis.COVIS_TOP_K == 7
+    config = ModelSetSettings(main=ALSSettings(**BASE), realtime=CoVisSettings(COVIS_MIN_COOC=3, COVIS_TOP_K=7))
+    assert config.realtime.COVIS_MIN_COOC == 3
+    assert config.realtime.COVIS_TOP_K == 7
 
 
 def test_sub_model_fields_are_no_longer_on_the_parent():
@@ -100,17 +105,45 @@ def test_sub_model_fields_are_no_longer_on_the_parent():
             ALSSettings(**BASE, **{legacy: 1})
 
 
-def test_als_passes_its_own_covis_config_to_the_sub_model(dataset):
-    config = ALSSettings(**BASE, covis=CoVisSettings(COVIS_MIN_COOC=2, COVIS_SESSION_WEIGHTS=True))
-    model = RecommenderALS(recsys_config=config, model_name="als_test", model_version="1")
+def test_composition_is_not_on_the_als_ranker_config():
+    """ALSSettings is a leaf: composing a model set through it is an error.
+
+    This is the whole point of the split - "who serves cold users" and "how are
+    two rankers fused" are not hyperparameters of ALS.
+    """
+    for field, value in (
+        ("fallback", PopularSettings()),
+        ("realtime", CoVisSettings()),
+        ("blend", BlendSettings()),
+    ):
+        with pytest.raises(Exception):
+            ALSSettings(**BASE, **{field: value})
+
+
+def test_the_set_hands_each_member_its_own_config(dataset):
+    """Members are configured BY the set and never reach into it."""
+    config = ModelSetSettings(
+        main=ALSSettings(**BASE),
+        fallback=PopularSettings(POPULARITY_STRATEGY="n_interactions"),
+        realtime=CoVisSettings(COVIS_MIN_COOC=2, COVIS_SESSION_WEIGHTS=True),
+    )
+    model = RecommenderModelSet(recsys_config=config, model_name="als_test", model_version="1")
     model.train(dataset)
-    assert model.covis.recsys_config is config.covis
+
+    assert model.main.recsys_config is config.main
+    assert model.fallback.recsys_config is config.fallback
+    assert model.realtime.recsys_config is config.realtime
+    # And the ALS member holds a LEAF config - no composition reachable from it.
+    assert not hasattr(model.main.recsys_config, "covis")
 
 
 # --- back-compat: artifacts pickled with the old flat shape -------------------
 
 
 def test_legacy_pickle_migrates_flat_fields_into_sub_configs():
+    # NOTE the names: this is an ALSSettings from a legacy pickle, and it carries
+    # `popular`/`covis` - the pre-role vocabulary. Translating those into
+    # main/fallback/session is `from_legacy_als_settings`, tested separately.
     config = _legacy_config()
     assert isinstance(config, ALSSettings)
     assert config.popular.POPULARITY_STRATEGY == "n_users"
@@ -119,14 +152,15 @@ def test_legacy_pickle_migrates_flat_fields_into_sub_configs():
     assert config.covis.COVIS_TOP_K == 100
     assert config.covis.COVIS_MIN_COOC == 2
     assert config.covis.COVIS_SESSION_WEIGHTS is False
-    assert config.blend.ALS_WEIGHT == 1.0
-    assert config.blend.COVIS_WEIGHT == 1.0
+    assert config.blend.MAIN_WEIGHT == 1.0
+    assert config.blend.REALTIME_WEIGHT == 1.0
     assert config.blend.RRF_K == 60
 
 
 def test_legacy_pickle_without_the_flag_has_no_session_layer():
     config = _legacy_config(SESSION_COVIS_ENABLED=False)
     assert config.covis is None
+    assert ModelSetSettings.from_legacy_als_settings(config).realtime is None
 
 
 def test_legacy_pickle_predating_covis_fields_entirely():
@@ -147,43 +181,76 @@ def test_legacy_pickle_keeps_the_old_attributes_readable():
 
 def test_legacy_blend_weights_are_actually_used():
     config = _legacy_config(BLEND_ALS_WEIGHT=3.5, BLEND_COVIS_WEIGHT=0.25, BLEND_RRF_K=11)
-    assert config.blend.ALS_WEIGHT == 3.5
-    assert config.blend.COVIS_WEIGHT == 0.25
+    assert config.blend.MAIN_WEIGHT == 3.5
+    assert config.blend.REALTIME_WEIGHT == 0.25
     assert config.blend.RRF_K == 11
 
 
 # --- back-compat, end to end: a whole model.pkl written with the old shape ----
 
 
+def _legacy_als_artifact_state(model_set: RecommenderModelSet) -> dict:
+    """The __dict__ a pre-2026-08-22 als_covis_youtravel artifact carried.
+
+    Back then RecommenderALS held every member itself, so one flat dict had the
+    ALS model, the cold PopularModel under `model_cold_users`, the covis object
+    under `covis`, and a flat-shaped ALSSettings. Every model.pkl in both buckets
+    still looks exactly like this.
+    """
+    main, fallback = model_set.main, model_set.fallback
+    return {
+        "model_name": "als_covis_youtravel",
+        "model_version": "1",
+        "recsys_config": LegacyALSSettings(LEGACY_ALS_COVIS_DICT),
+        "model_hot_users": main.model_hot_users,
+        "model_cold_users": fallback.model,
+        "covis": model_set.realtime,
+        "dataset": main.dataset,
+        "item_id_map": main.item_id_map,
+        "user_id_map": main.user_id_map,
+        "item_similarity": main.item_similarity,
+        "user_ids_hot": main.user_ids_hot,
+        "item_ids_hot": main.item_ids_hot,
+        "implicit_neginf_score": main.implicit_neginf_score,
+        "user_item_matrix_binary": None,
+    }
+
+
 def test_legacy_artifact_loads_and_recommends_identically(dataset, tmp_path):
-    """Train, write model.pkl with a LEGACY-shaped recsys_config, reload it with
-    the current code, and assert the recommender builds and serves the same
-    recommendations and strategies as an equivalent new-shape model."""
-    new_config = ALSSettings(
-        **BASE,
-        popular=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
-        covis=CoVisSettings(RECOMMENDER_DAYS_THRESHOLD=30, COVIS_TOP_K=100, COVIS_MIN_COOC=2),
+    """The whole reason the legacy adapter is allowed to exist.
+
+    Write a model.pkl in the OLD RecommenderALS shape, adapt it into a model set,
+    and assert every visitor segment answers exactly as a freshly trained set
+    does - same items, same scores, same strategy. If this passes, prod artifacts
+    keep serving unchanged across the refactor; if it fails, they degrade
+    silently, because a wrong member assignment raises nothing.
+    """
+    config = ModelSetSettings(
+        main=ALSSettings(**BASE),
+        fallback=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
+        realtime=CoVisSettings(RECOMMENDER_DAYS_THRESHOLD=30, COVIS_TOP_K=100, COVIS_MIN_COOC=2),
     )
-    reference = RecommenderALS(recsys_config=new_config, model_name="als_covis_youtravel", model_version="1")
+    reference = RecommenderModelSet(recsys_config=config, model_name="als_covis_youtravel", model_version="1")
     reference.train(dataset)
 
-    # Same trained artifact, but with the pre-refactor config object inside.
-    legacy_state = dict(reference.__dict__)
-    legacy_state["recsys_config"] = LegacyALSSettings(LEGACY_ALS_COVIS_DICT)
     save_dir = tmp_path / "als_covis_youtravel"
     save_dir.mkdir()
     with open(save_dir / "model.pkl", "wb") as file:
-        dill.dump(legacy_state, file)
+        dill.dump(_legacy_als_artifact_state(reference), file)
 
-    loaded = RecommenderALS.load_model(load_dir=str(save_dir))
-    assert isinstance(loaded.recsys_config, ALSSettings)
-    assert loaded.recsys_config.covis is not None
+    with open(save_dir / "model.pkl", "rb") as file:
+        loaded = RecommenderModelSet.from_legacy_als_state(dill.load(file))
+
+    # The members were reassembled from the flat state, not from a config.
+    assert isinstance(loaded.main, RecommenderALS)
+    assert isinstance(loaded.fallback, RecommenderPopular)
+    assert loaded.realtime is not None
 
     cases = [
-        dict(user_ids="u1", history=["m2", "m1"]),  # hot + session -> ALS x CoVis blend
-        dict(user_ids="ghost-user", history=["m1", "m2"]),  # unknown + session -> CoVis
-        dict(user_ids="u1", history=None),  # hot, no session -> pure ALS
-        dict(user_ids="ghost-user", history=None),  # cold -> popular
+        dict(user_ids="u1", history=["m2", "m1"]),  # known + session -> fused
+        dict(user_ids="ghost-user", history=["m1", "m2"]),  # unknown + session -> session member
+        dict(user_ids="u1", history=None),  # known, no session -> main
+        dict(user_ids="ghost-user", history=None),  # cold -> fallback
     ]
     for case in cases:
         got = loaded.recommend(top_n=3, filter_viewed=True, **case)
@@ -192,12 +259,74 @@ def test_legacy_artifact_loads_and_recommends_identically(dataset, tmp_path):
         assert got.item_ids == want.item_ids, case
         assert got.scores == want.scores, case
 
-    # And the blend path really did run off the migrated config: the covis layer
-    # is present and the hot-plus-session request reports that segment.
-    assert loaded.covis is not None
     assert loaded.recommend("u1", top_n=3, filter_viewed=True, history=["m2", "m1"]).strategy == (
         Strategy.MODEL_REALTIME_HOT_USERS.value
     )
+
+
+def test_legacy_artifact_without_a_session_layer_still_routes(dataset, tmp_path):
+    """An als_youtravel artifact: no covis inside, so main scores the session."""
+    config = ModelSetSettings(
+        main=ALSSettings(**BASE),
+        fallback=PopularSettings(POPULARITY_STRATEGY="n_users", POPULARITY_PERIOD=timedelta(days=14)),
+    )
+    reference = RecommenderModelSet(recsys_config=config, model_name="als_youtravel", model_version="1")
+    reference.train(dataset)
+
+    state = _legacy_als_artifact_state(reference)
+    # Through a real pickle round-trip, so __setstate__ runs exactly as it does
+    # on a load from S3 - handing over the stand-in object would skip it.
+    state["recsys_config"] = _legacy_config(SESSION_COVIS_ENABLED=False)
+    state["covis"] = None
+    state["model_name"] = "als_youtravel"
+
+    loaded = RecommenderModelSet.from_legacy_als_state(state)
+    assert loaded.realtime is None
+
+    for case in (
+        dict(user_ids="u1", history=["m2", "m1"]),
+        dict(user_ids="ghost-user", history=["m1", "m2"]),
+        dict(user_ids="u1", history=None),
+        dict(user_ids="ghost-user", history=None),
+    ):
+        got = loaded.recommend(top_n=3, filter_viewed=True, **case)
+        want = reference.recommend(top_n=3, filter_viewed=True, **case)
+        assert (got.strategy, got.item_ids, got.scores) == (want.strategy, want.item_ids, want.scores), case
+
+
+def test_legacy_nested_config_is_read_as_a_model_set():
+    """The shape shipped between the two refactors: composition on ALSSettings.
+
+    Nothing rebuilds these by migration - they arrive as an ALSSettings with the
+    sub-configs already in __dict__, and `model_set` has to read them from there.
+    """
+    config = ALSSettings(**BASE)
+    config.__dict__["popular"] = PopularSettings(POPULARITY_STRATEGY="n_interactions")
+    config.__dict__["covis"] = CoVisSettings(COVIS_TOP_K=33)
+    config.__dict__["blend"] = BlendSettings(MAIN_WEIGHT=2.5, REALTIME_WEIGHT=0.5, RRF_K=7)
+
+    model_set = ModelSetSettings.from_legacy_als_settings(config)
+    # In goes the old model-named vocabulary, out comes roles.
+    assert model_set.main.ALS_FACTORS == BASE["ALS_FACTORS"]
+    assert model_set.fallback.POPULARITY_STRATEGY == "n_interactions"
+    assert model_set.realtime.COVIS_TOP_K == 33
+    assert model_set.blend.MAIN_WEIGHT == 2.5
+    assert model_set.blend.RRF_K == 7
+
+
+def test_legacy_artifact_blends_with_its_own_weights_not_defaults(dataset):
+    """The silent failure the `model_set` shim exists to prevent.
+
+    `blend` is the only composition field read on the serving path. If a legacy
+    artifact were read as a bare ModelSetSettings, nothing would raise - the RRF
+    fusion would just run with default 1.0/1.0/60 instead of the trained weights,
+    and the feed would quietly change ranking with no error anywhere.
+    """
+    trained = _legacy_config(BLEND_ALS_WEIGHT=4.0, BLEND_COVIS_WEIGHT=0.1, BLEND_RRF_K=13)
+
+    blend = ModelSetSettings.from_legacy_als_settings(trained).blend
+    assert (blend.MAIN_WEIGHT, blend.REALTIME_WEIGHT, blend.RRF_K) == (4.0, 0.1, 13)
+    assert blend != BlendSettings(), "read the trained weights, not the defaults"
 
 
 def test_legacy_covis_artifact_loads_and_recommends(dataset, tmp_path):

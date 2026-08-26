@@ -1,13 +1,13 @@
-"""Tests for the covis session layer inside RecommenderALS (recsys_config.covis).
+"""Tests for the covis session layer of the ALS model set (ModelSetSettings.covis).
 
 Uses the shared synthetic dataset from conftest.py: maldives cluster (u1-u3,
 m1-m3), turkey cluster (u4-u6, t1-t3), globally popular pop1.
 """
 
-from smartrec_lib.model import ALSSettings, CoVisSettings, Strategy
-from smartrec_lib.recommenders import RecommenderALS
+from smartrec_lib.model import ALSSettings, CoVisSettings, ModelSetSettings, Strategy
+from smartrec_lib.recommenders import RecommenderModelSet
 
-BASE = dict(
+BASE_ALS = dict(
     ALS_ITERATIONS=2,
     ALS_REGULARIZATION_FACTOR=0.01,
     ALS_FACTORS=8,
@@ -17,8 +17,9 @@ BASE = dict(
 
 
 def _fitted(dataset, **overrides):
-    config = ALSSettings(**{**BASE, **overrides})
-    model = RecommenderALS(recsys_config=config, model_name="als_test", model_version="1")
+    """Overrides apply to the model set (covis=, blend=), not to the ALS ranker."""
+    config = ModelSetSettings(main=ALSSettings(**BASE_ALS), **overrides)
+    model = RecommenderModelSet(recsys_config=config, model_name="als_test", model_version="1")
     model.train(dataset)
     return model
 
@@ -34,15 +35,15 @@ def test_no_covis_config_hot_user_with_session_keeps_realtime_strategy(dataset):
 
 def test_no_covis_config_trains_no_covis_layer(dataset):
     model = _fitted(dataset)
-    assert model.recsys_config.covis is None
-    assert model.covis is None
+    assert model.recsys_config.realtime is None
+    assert model.realtime is None
 
 
 # --- covis sub-config present: session paths replaced by covis ----------------
 
 
 def test_hot_user_without_session_serves_pure_als(dataset):
-    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
+    model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("u1", top_n=3, filter_viewed=True, history=None)
     assert result.strategy == Strategy.MODEL_HOT_USERS.value
     assert result.item_ids
@@ -51,7 +52,7 @@ def test_hot_user_without_session_serves_pure_als(dataset):
 def test_hot_user_with_session_reports_the_realtime_segment(dataset):
     """The blend keeps the label the item-sim session path always used: the
     strategy names the segment (hot user, live session), not the algorithm."""
-    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
+    model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("u1", top_n=3, filter_viewed=True, history=["m2", "m1"])
     assert result.strategy == Strategy.MODEL_REALTIME_HOT_USERS.value
     assert result.item_ids
@@ -63,7 +64,7 @@ def test_hot_user_with_session_actually_goes_through_covis(dataset):
     """Since both paths now report the same strategy, the label can no longer
     prove which one ran - so compare against the same model without the covis
     sub-config. Identical output would mean the blend never engaged."""
-    blended = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
+    blended = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     item_sim = _fitted(dataset)
     session = ["m2", "m1"]
 
@@ -75,7 +76,7 @@ def test_hot_user_with_session_actually_goes_through_covis(dataset):
 
 
 def test_unknown_user_with_session_reports_the_realtime_segment(dataset):
-    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
+    model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("ghost-user", top_n=3, filter_viewed=True, history=["m1", "m2"])
     assert result.strategy == Strategy.MODEL_REALTIME_WARM_USERS.value
     assert result.item_ids
@@ -83,7 +84,7 @@ def test_unknown_user_with_session_reports_the_realtime_segment(dataset):
 
 
 def test_unknown_user_with_session_actually_goes_through_covis(dataset):
-    covis_model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
+    covis_model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     item_sim = _fitted(dataset)
     session = ["m1", "m2"]
 
@@ -97,7 +98,7 @@ def test_unknown_user_with_unknown_session_falls_back_to_item_sim(dataset):
     """History covis has never seen -> covis returns nothing -> the parent
     item-sim path answers. Both report the same strategy now, so the fallback is
     pinned by output equality with the no-covis model instead."""
-    covis_model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
+    covis_model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     item_sim = _fitted(dataset)
     session = ["nope-1", "nope-2"]
 
@@ -108,7 +109,7 @@ def test_unknown_user_with_unknown_session_falls_back_to_item_sim(dataset):
 
 
 def test_cold_user_without_session_serves_popular(dataset):
-    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
+    model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     result = model.recommend("ghost-user", top_n=3, filter_viewed=False, history=None)
     assert result.strategy == Strategy.MODEL_COLD_USERS.value
     assert result.item_ids
@@ -122,7 +123,7 @@ def test_session_paths_accept_numpy_history(dataset):
     `if not history` on a multi-element ndarray raises ValueError."""
     import numpy as np
 
-    model = _fitted(dataset, covis=CoVisSettings(COVIS_MIN_COOC=2))
+    model = _fitted(dataset, realtime=CoVisSettings(COVIS_MIN_COOC=2))
     history_np = np.array(["m1", "m2"], dtype=object)
     result = model.recommend("ghost-user", top_n=3, filter_viewed=True, history=history_np)
     assert result.strategy == Strategy.MODEL_REALTIME_WARM_USERS.value

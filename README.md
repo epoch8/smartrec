@@ -28,7 +28,7 @@ from datetime import datetime
 
 import pandas as pd
 from rectools.dataset import Dataset
-from smartrec_lib.model import ALSSettings
+from smartrec_lib.model import ALSSettings, ModelSetSettings
 from smartrec_lib.recommenders.recommender_als import RecommenderALS
 
 interactions = pd.DataFrame({
@@ -38,6 +38,7 @@ interactions = pd.DataFrame({
     "datetime": pd.to_datetime(["2024-10-01", "2024-10-02", "2024-10-03"]),
 })
 
+# A member takes its OWN leaf config; only the set takes ModelSetSettings.
 model = RecommenderALS(
     recsys_config=ALSSettings(
         ALS_FACTORS=64, ALS_ITERATIONS=15,
