@@ -147,6 +147,10 @@ every change; they are enforced by this list.
 7. `serving/config.pbtxt` and `serving/model.py` in this tree *are* the deployed files — the trainer
    overwrites them in S3 on every run. A bad import in `serving/model.py` breaks every model in the
    bucket, including ones that were not retrained.
+   `config.pbtxt` declares an optional `context` input that `model.py` does not read: the feed API
+   sends it on every SERP with a country/region/type filter, and Triton rejects a request naming an
+   undeclared input, so removing the declaration fails every filtered feed request (it did, between
+   2026-08-14 and this note). Drop it only after the API stops sending it.
 8. `Strategy` declares what a model MAY emit; `api/docs/DEBUG_INFO_CODEC.md` owns the published
    vocabulary and its numeric ids, which are append-only and never renumbered. The two are NOT the
    same set: the codec has rows with no member here (`popular`/8, `random`/9, and since 2026-08-25

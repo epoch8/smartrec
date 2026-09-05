@@ -120,8 +120,10 @@ def recommendations_triton_with_client(
     :param filter_viewed: Whether to filter viewed items.
     :param items_to_recommend: Optional list of items to restrict recommendations to.
     :param history: Optional list of item IDs from user's interaction history (for warm/new users).
-    :param context: Optional request context (e.g. {"country": ...}); only consumed by
-        models whose Triton config declares a "context" input (the orchestrator).
+    :param context: Optional request context (e.g. {"country": ...}). Sent as a
+        "context" input when non-empty. No served model reads it today; the input
+        stays declared in serving/config.pbtxt because Triton rejects a request
+        naming an input the model config does not declare.
 
     :return: Dictionary with model version, data, and strategy.
     """

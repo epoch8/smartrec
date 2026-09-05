@@ -32,6 +32,16 @@ input [
     optional: true
   },
   {
+    # Declared but not read by model.py. The feed API sends it whenever a SERP
+    # carries a country/region/type filter, and Triton rejects a request that
+    # names an input the config does not declare - so dropping this line fails
+    # every filtered feed request. Keep it until the API stops sending it.
+    name: "context"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+    optional: true
+  },
+  {
     name: "top_n"
     data_type: TYPE_INT32
     dims: [ 1 ]
